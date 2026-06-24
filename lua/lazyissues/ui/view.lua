@@ -1655,6 +1655,9 @@ local function release_edit_menu(V)
   menu:mount()
 end
 
+-- Forward declaration (defined after the template picker section).
+local edit_template_flow
+
 -- Buffer-local keymaps applied to every panel.
 local function map_keys(V, bufnr, kind)
   local function map(lhs, fn)
@@ -2148,7 +2151,7 @@ local function finalize_template(data_root, selected_fields, existing_template, 
 end
 
 -- Full template editing flow: pick fields → configure enums → save/migrate.
-local function edit_template_flow(data_root, existing_template, on_done)
+edit_template_flow = function(data_root, existing_template, on_done)
   local selected = {}
   if existing_template then
     for _, f in ipairs(existing_template.fields) do
