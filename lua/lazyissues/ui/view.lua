@@ -410,22 +410,70 @@ local function render_detail(V, node)
       hls[#hls + 1] = { valgroup, li, 13, -1 }
     end
   end
-  field("Status", val(it.Status), icons.status_hl[it.Status])
-  field("Priority", val(it.Priority), icons.priority_hl[it.Priority])
-  field("Assignee", val(it.Assignee))
-  field("Reporter", val(it.Reporter))
-  field("Sprint", sprint_name(V.model, it.SprintId))
-  field("Tags", (it.Tags and #it.Tags > 0) and table.concat(it.Tags, ", ") or "—")
-  field("Created", val(tostring(it.CreatedAt)):sub(1, 19))
-  field("Rel. note", val(it.ReleaseNoteType))
 
-  add("  " .. string.rep("─", 28))
-  add("  Description", "LazyIssuesLabel")
-  for _, dl in ipairs(wrap(it.Description or "", width - 2)) do
-    add("    " .. dl)
+  -- Render detail fields from the template if present, else hardcoded.
+  local tmpl = V.model.template
+  -- Fields that have special rendering and are not shown inline.
+  local special = { Title = true, Description = true, Comments = true }
+  if tmpl then
+    for _, f in ipairs(tmpl.fields) do
+      if not special[f.name] then
+        local v = it[f.name]
+        local display
+        if f.name == "SprintId" then
+          display = sprint_name(V.model, v)
+        elseif f.type == "list" and type(v) == "table" and #v > 0 then
+          display = table.concat(v, ", ")
+        else
+          display = val(v)
+        end
+        local valgroup = nil
+        if f.name == "Status" then
+          valgroup = icons.status_hl[v]
+        elseif f.name == "Priority" then
+          valgroup = icons.priority_hl[v]
+        end
+        field(f.name, display, valgroup)
+      end
+    end
+  else
+    field("Status", val(it.Status), icons.status_hl[it.Status])
+    field("Priority", val(it.Priority), icons.priority_hl[it.Priority])
+    field("Assignee", val(it.Assignee))
+    field("Reporter", val(it.Reporter))
+    field("Sprint", sprint_name(V.model, it.SprintId))
+    field("Tags", (it.Tags and #it.Tags > 0) and table.concat(it.Tags, ", ") or "—")
+    field("Rel. note", val(it.ReleaseNoteType))
+  end
+  field("Created", val(tostring(it.CreatedAt)):sub(1, 19))
+
+  -- Description (if in template or no template).
+  local has_desc = not tmpl
+  local has_comments = not tmpl
+  if tmpl then
+    for _, f in ipairs(tmpl.fields) do
+      if f.name == "Description" then
+        has_desc = true
+      elseif f.name == "Comments" then
+        has_comments = true
+      end
+    end
+  end
+
+  if has_desc then
+    add("  " .. string.rep("─", 28))
+    add("  Description", "LazyIssuesLabel")
+    for _, dl in ipairs(wrap(it.Description or "", width - 2)) do
+      add("    " .. dl)
+    end
   end
   add("  " .. string.rep("─", 28))
-  add(string.format("  Comments (%d)   Children (%d)", (it.Comments and #it.Comments) or 0, #node.children))
+  local footer_parts = {}
+  if has_comments then
+    footer_parts[#footer_parts + 1] = string.format("Comments (%d)", (it.Comments and #it.Comments) or 0)
+  end
+  footer_parts[#footer_parts + 1] = string.format("Children (%d)", #node.children)
+  add("  " .. table.concat(footer_parts, "   "))
 
   set_lines(bufnr, lines)
   for _, h in ipairs(hls) do
@@ -608,7 +656,7 @@ local function apply_field(V, node, key, value)
   end
   local it = vim.tbl_extend("force", {}, node.issue)
   it[key] = value
-  local ok, err = actions.save_issue(node.path, it)
+  local ok, err = actions.save_issue(node.path, it, V.model.template)
   if not ok then
     vim.notify("lazyissues: " .. tostring(err), vim.log.levels.ERROR)
     return
@@ -999,24 +1047,6 @@ local function edit_menu(V)
     return Menu.item(string.format("  %-17s %s%s", name, value or "", lk(field)), { action = action })
   end
 
-  local lines = {
-    item("Status", val(it.Status), "Status", "status"),
-    item("Priority", val(it.Priority), "Priority", "priority"),
-    item("Type", val(it.Type), "Type", "type"),
-    item("Assignee", val(it.Assignee), "Assignee", "assignee"),
-    item("Sprint", sprint_name(V.model, it.SprintId), "Sprint", "sprint"),
-    item("Title", nil, "Title", "title"),
-    item("Description", nil, "Description", "description"),
-    item("Tags", tags, "Tags", "tags"),
-    item("Release note type", val(it.ReleaseNoteType), "ReleaseNoteType", "notetype"),
-    item("Release note", nil, "ReleaseNote", "note"),
-    item("Comments", "(" .. ncomments .. ")", nil, "comments"),
-    Menu.separator("actions"),
-    Menu.item("  + New child issue", { action = "child" }),
-    Menu.item("  ↳ Change parent", { action = "reparent" }),
-    Menu.item("  ✗ Delete issue", { action = "delete" }),
-  }
-
   -- Reopen the menu after a field edit (success or cancel) so it acts as a hub.
   local reopen
   reopen = function()
@@ -1025,53 +1055,172 @@ local function edit_menu(V)
     end)
   end
 
-  local dispatch = {
-    status = function()
-      picker(V, "Status", config.issue_status, "Status:", nil, reopen)
-    end,
-    priority = function()
-      picker(V, "Priority", config.issue_priority, "Priority:", nil, reopen)
-    end,
-    type = function()
-      picker(V, "Type", config.issue_type, "Type:", nil, reopen)
-    end,
-    assignee = function()
-      picker(V, "Assignee", config.assignees, "Assignee:", function(c)
-        return c == "Unassigned" and "" or c
-      end, reopen)
-    end,
-    sprint = function()
-      pick_sprint(V, reopen)
-    end,
-    title = function()
-      edit_text(V, "Title", "Title: ", reopen)
-    end,
-    description = function()
-      edit_multiline(V, "Description", "Description", reopen)
-    end,
-    tags = function()
-      edit_tags(V, reopen)
-    end,
-    notetype = function()
-      picker(V, "ReleaseNoteType", config.release_note_type, "Release note type:", nil, reopen)
-    end,
-    note = function()
-      edit_multiline(V, "ReleaseNote", "Release note", reopen)
-    end,
-    comments = function()
-      comments_view(V, reopen)
-    end,
-    -- Structural actions change the selection/tree, so they don't reopen.
-    child = function()
-      create_issue_action(V, node)
-    end,
-    reparent = function()
-      change_parent_action(V)
-    end,
-    delete = function()
-      delete_action(V)
-    end,
-  }
+  local lines = {}
+  local dispatch = {}
+  local tmpl = V.model.template
+
+  -- Build field items from template if available, else hardcoded.
+  if tmpl then
+    for _, f in ipairs(tmpl.fields) do
+      local fname = f.name
+      local action = "field_" .. fname
+      local display
+      if fname == "SprintId" then
+        display = sprint_name(V.model, it.SprintId)
+      elseif fname == "Comments" then
+        display = "(" .. ncomments .. ")"
+      elseif f.type == "list" and type(it[fname]) == "table" and #it[fname] > 0 then
+        display = table.concat(it[fname], ", "):sub(1, 12)
+      elseif fname == "Description" or fname == "ReleaseNote" then
+        display = nil
+      else
+        display = val(it[fname])
+      end
+      lines[#lines + 1] = item(fname, display, fname, action)
+
+      -- Build dispatch for this field based on type.
+      if fname == "Comments" then
+        dispatch[action] = function()
+          comments_view(V, reopen)
+        end
+      elseif fname == "SprintId" then
+        dispatch[action] = function()
+          pick_sprint(V, reopen)
+        end
+      elseif fname == "Assignee" then
+        dispatch[action] = function()
+          picker(V, "Assignee", config.assignees, "Assignee:", function(c)
+            return c == "Unassigned" and "" or c
+          end, reopen)
+        end
+      elseif f.type == "enum" and f.values then
+        dispatch[action] = function()
+          picker(V, fname, f.values, fname .. ":", nil, reopen)
+        end
+      elseif f.type == "list" then
+        dispatch[action] = function()
+          -- Reuse tag-style editor for any list field.
+          local node2 = selected_node(V)
+          if not node2 then
+            return done(reopen)
+          end
+          if not editable(node2, fname) then
+            locked_notify()
+            return done(reopen)
+          end
+          local cur = (type(node2.issue[fname]) == "table" and table.concat(node2.issue[fname], ", ")) or ""
+          vim.ui.input({ prompt = fname .. " (comma-separated): ", default = cur }, function(input)
+            if input ~= nil then
+              local items2 = {}
+              for t in input:gmatch("[^,]+") do
+                local trimmed = vim.trim(t)
+                if trimmed ~= "" then
+                  items2[#items2 + 1] = trimmed
+                end
+              end
+              apply_field(V, node2, fname, items2)
+            end
+            done(reopen)
+          end)
+        end
+      elseif fname == "Description" or fname == "ReleaseNote" then
+        dispatch[action] = function()
+          edit_multiline(V, fname, fname, reopen)
+        end
+      elseif f.type == "number" then
+        dispatch[action] = function()
+          local node2 = selected_node(V)
+          if not node2 then
+            return done(reopen)
+          end
+          if not editable(node2, fname) then
+            locked_notify()
+            return done(reopen)
+          end
+          local cur = node2.issue[fname]
+          if cur == vim.NIL then
+            cur = ""
+          end
+          vim.ui.input({ prompt = fname .. ": ", default = tostring(cur or "") }, function(input)
+            if input ~= nil then
+              apply_field(V, node2, fname, tonumber(input))
+            end
+            done(reopen)
+          end)
+        end
+      else
+        dispatch[action] = function()
+          edit_text(V, fname, fname .. ": ", reopen)
+        end
+      end
+    end
+  else
+    lines = {
+      item("Status", val(it.Status), "Status", "status"),
+      item("Priority", val(it.Priority), "Priority", "priority"),
+      item("Type", val(it.Type), "Type", "type"),
+      item("Assignee", val(it.Assignee), "Assignee", "assignee"),
+      item("Sprint", sprint_name(V.model, it.SprintId), "Sprint", "sprint"),
+      item("Title", nil, "Title", "title"),
+      item("Description", nil, "Description", "description"),
+      item("Tags", tags, "Tags", "tags"),
+      item("Release note type", val(it.ReleaseNoteType), "ReleaseNoteType", "notetype"),
+      item("Release note", nil, "ReleaseNote", "note"),
+      item("Comments", "(" .. ncomments .. ")", nil, "comments"),
+    }
+    dispatch = {
+      status = function()
+        picker(V, "Status", config.issue_status, "Status:", nil, reopen)
+      end,
+      priority = function()
+        picker(V, "Priority", config.issue_priority, "Priority:", nil, reopen)
+      end,
+      type = function()
+        picker(V, "Type", config.issue_type, "Type:", nil, reopen)
+      end,
+      assignee = function()
+        picker(V, "Assignee", config.assignees, "Assignee:", function(c)
+          return c == "Unassigned" and "" or c
+        end, reopen)
+      end,
+      sprint = function()
+        pick_sprint(V, reopen)
+      end,
+      title = function()
+        edit_text(V, "Title", "Title: ", reopen)
+      end,
+      description = function()
+        edit_multiline(V, "Description", "Description", reopen)
+      end,
+      tags = function()
+        edit_tags(V, reopen)
+      end,
+      notetype = function()
+        picker(V, "ReleaseNoteType", config.release_note_type, "Release note type:", nil, reopen)
+      end,
+      note = function()
+        edit_multiline(V, "ReleaseNote", "Release note", reopen)
+      end,
+      comments = function()
+        comments_view(V, reopen)
+      end,
+    }
+  end
+
+  -- Structural actions (always present).
+  lines[#lines + 1] = Menu.separator("actions")
+  lines[#lines + 1] = Menu.item("  + New child issue", { action = "child" })
+  lines[#lines + 1] = Menu.item("  ↳ Change parent", { action = "reparent" })
+  lines[#lines + 1] = Menu.item("  ✗ Delete issue", { action = "delete" })
+  dispatch.child = function()
+    create_issue_action(V, node)
+  end
+  dispatch.reparent = function()
+    change_parent_action(V)
+  end
+  dispatch.delete = function()
+    delete_action(V)
+  end
 
   local menu = Menu({
     position = "50%",
@@ -1547,6 +1696,12 @@ local function map_keys(V, bufnr, kind)
   map("?", function()
     M.help()
   end)
+  map("E", function()
+    local template = actions.load_template(V.root)
+    edit_template_flow(V.root, template, function()
+      reload(V)
+    end)
+  end)
 
   if kind == "scopes" then
     map("<CR>", function()
@@ -1662,7 +1817,7 @@ function M.help()
     "    j / k          move cursor          <CR>        select / open",
     "    <Space>        expand / collapse    /           search by title",
     "    l / h          detail / scopes      r           reload",
-    "    ? / q / <Esc>  help / close",
+    "    E              edit template    ? / q / <Esc>  help / close",
     "",
     "  Edit selected issue",
     "    e edit menu   c comments   o new   D delete   P re-parent",
@@ -1741,6 +1896,280 @@ function M.help()
   end
 end
 
+-- ── template picker ─────────────────────────────────────────────────────────
+
+-- Interactive checklist for selecting issue fields from the predefined list.
+-- `selected` is an optional set { [field_name] = true } of pre-selected fields.
+-- `on_done(fields)` is called with the list of selected predefined field defs.
+-- If editing an existing template, `existing_template` is passed so we can
+-- detect added/removed fields.
+local function template_picker(selected, existing_template, on_done)
+  local Popup = require("nui.popup")
+  local fields = config.predefined_fields
+  local checked = {}
+  for _, f in ipairs(fields) do
+    checked[f.name] = selected and selected[f.name] or false
+  end
+
+  local pop = Popup({
+    enter = true,
+    border = {
+      style = "rounded",
+      text = {
+        top = " Select issue fields ",
+        top_align = "center",
+        bottom = " space toggle · enter confirm · q cancel ",
+        bottom_align = "center",
+      },
+    },
+    position = "50%",
+    size = { width = 64, height = #fields + 4 },
+    buf_options = { modifiable = false, filetype = "lazyissues-picker" },
+    win_options = { winhighlight = "Normal:Normal,FloatBorder:FloatBorder", cursorline = true },
+  })
+  pop:mount()
+
+  local function redraw()
+    local lines = {
+      "  Choose which fields your issues will have:",
+      "",
+    }
+    for _, f in ipairs(fields) do
+      local mark = checked[f.name] and "[x]" or "[ ]"
+      lines[#lines + 1] = string.format("  %s  %-20s  (%s)", mark, f.name, f.type)
+    end
+    vim.bo[pop.bufnr].modifiable = true
+    vim.api.nvim_buf_set_lines(pop.bufnr, 0, -1, false, lines)
+    vim.bo[pop.bufnr].modifiable = false
+    vim.api.nvim_buf_clear_namespace(pop.bufnr, ns, 0, -1)
+    vim.api.nvim_buf_add_highlight(pop.bufnr, ns, "LazyIssuesLabel", 0, 0, -1)
+    local offset = 2 -- header lines
+    for i, f in ipairs(fields) do
+      if checked[f.name] then
+        vim.api.nvim_buf_add_highlight(pop.bufnr, ns, "LazyIssuesOpen", offset + i - 1, 0, -1)
+      end
+    end
+  end
+
+  local offset = 2 -- header lines
+  local function toggle()
+    local row = vim.api.nvim_win_get_cursor(pop.winid)[1]
+    local f = fields[row - offset]
+    if f then
+      checked[f.name] = not checked[f.name]
+      redraw()
+    end
+  end
+
+  local function confirm()
+    pcall(function()
+      pop:unmount()
+    end)
+    local result = {}
+    for _, f in ipairs(fields) do
+      if checked[f.name] then
+        result[#result + 1] = vim.deepcopy(f)
+      end
+    end
+    if on_done then
+      on_done(result)
+    end
+  end
+
+  local function cancel()
+    pcall(function()
+      pop:unmount()
+    end)
+  end
+
+  local b = pop.bufnr
+  vim.keymap.set("n", "<Space>", toggle, { buffer = b, nowait = true, silent = true })
+  vim.keymap.set("n", "x", toggle, { buffer = b, nowait = true, silent = true })
+  vim.keymap.set("n", "<CR>", confirm, { buffer = b, nowait = true, silent = true })
+  for _, k in ipairs({ "q", "<Esc>" }) do
+    vim.keymap.set("n", k, cancel, { buffer = b, nowait = true, silent = true })
+  end
+  vim.keymap.set("n", "j", "j", { buffer = b, nowait = true, silent = true })
+  vim.keymap.set("n", "k", "k", { buffer = b, nowait = true, silent = true })
+  redraw()
+  -- Place cursor on the first field row (past the header).
+  pcall(vim.api.nvim_win_set_cursor, pop.winid, { offset + 1, 0 })
+end
+
+-- Prompt for enum values for all enum fields in the selected list.
+-- Calls on_done(fields) with the fields updated with user-chosen values.
+local function configure_enum_values(selected_fields, on_done)
+  local enums = {}
+  for _, f in ipairs(selected_fields) do
+    if f.type == "enum" then
+      enums[#enums + 1] = f
+    end
+  end
+  if #enums == 0 then
+    return on_done(selected_fields)
+  end
+  local idx = 0
+  local function next_enum()
+    idx = idx + 1
+    if idx > #enums then
+      return on_done(selected_fields)
+    end
+    local f = enums[idx]
+    local cur = table.concat(f.values or {}, ", ")
+    vim.ui.input({
+      prompt = f.name .. " values (comma-separated): ",
+      default = cur,
+    }, function(input)
+      if input and vim.trim(input) ~= "" then
+        local vals = {}
+        for v in input:gmatch("[^,]+") do
+          local trimmed = vim.trim(v)
+          if trimmed ~= "" then
+            vals[#vals + 1] = trimmed
+          end
+        end
+        if #vals > 0 then
+          f.values = vals
+        end
+      end
+      vim.schedule(next_enum)
+    end)
+  end
+  next_enum()
+end
+
+-- Build and save template from selected fields. Handles the init flow
+-- (no existing template) and the edit flow (existing template with diffs).
+local function finalize_template(data_root, selected_fields, existing_template, on_done)
+  local template = { fields = selected_fields }
+
+  if existing_template then
+    -- Compute added and removed fields.
+    local old_set = {}
+    for _, f in ipairs(existing_template.fields) do
+      old_set[f.name] = true
+    end
+    local new_set = {}
+    for _, f in ipairs(selected_fields) do
+      new_set[f.name] = true
+    end
+
+    local added = {}
+    for _, f in ipairs(selected_fields) do
+      if not old_set[f.name] then
+        added[#added + 1] = f
+      end
+    end
+    local removed = {}
+    for _, f in ipairs(existing_template.fields) do
+      if not new_set[f.name] then
+        removed[#removed + 1] = f
+      end
+    end
+
+    -- Process added fields: prompt for default and backfill.
+    local function process_added(i, cb)
+      if i > #added then
+        return cb()
+      end
+      local f = added[i]
+      local prompt = "Default value for new field '" .. f.name .. "': "
+      if f.type == "enum" and f.values then
+        vim.ui.select(f.values, { prompt = prompt }, function(choice)
+          if choice then
+            actions.backfill_field(data_root, f.name, choice)
+          else
+            actions.backfill_field(data_root, f.name, f.default)
+          end
+          vim.schedule(function()
+            process_added(i + 1, cb)
+          end)
+        end)
+      elseif f.type == "number" then
+        vim.ui.input({ prompt = prompt, default = "0" }, function(input)
+          local val = tonumber(input) or f.default
+          actions.backfill_field(data_root, f.name, val)
+          vim.schedule(function()
+            process_added(i + 1, cb)
+          end)
+        end)
+      elseif f.type == "list" then
+        actions.backfill_field(data_root, f.name, {})
+        vim.schedule(function()
+          process_added(i + 1, cb)
+        end)
+      else
+        vim.ui.input({ prompt = prompt, default = tostring(f.default or "") }, function(input)
+          actions.backfill_field(data_root, f.name, input or f.default or "")
+          vim.schedule(function()
+            process_added(i + 1, cb)
+          end)
+        end)
+      end
+    end
+
+    -- Process removed fields: ask to delete or keep.
+    local function process_removed(i, cb)
+      if i > #removed then
+        return cb()
+      end
+      local f = removed[i]
+      vim.ui.select(
+        { "Delete from all issues", "Keep data (orphaned)" },
+        { prompt = "Field '" .. f.name .. "' removed:" },
+        function(choice)
+          if choice and choice:find("^Delete") then
+            actions.remove_field_from_issues(data_root, f.name)
+          end
+          vim.schedule(function()
+            process_removed(i + 1, cb)
+          end)
+        end
+      )
+    end
+
+    process_added(1, function()
+      process_removed(1, function()
+        actions.save_template(data_root, template)
+        vim.notify("lazyissues: template updated", vim.log.levels.INFO)
+        if on_done then
+          on_done()
+        end
+      end)
+    end)
+  else
+    -- New template: just save.
+    actions.save_template(data_root, template)
+    vim.notify("lazyissues: template saved", vim.log.levels.INFO)
+    if on_done then
+      on_done()
+    end
+  end
+end
+
+-- Full template editing flow: pick fields → configure enums → save/migrate.
+local function edit_template_flow(data_root, existing_template, on_done)
+  local selected = {}
+  if existing_template then
+    for _, f in ipairs(existing_template.fields) do
+      selected[f.name] = true
+    end
+  end
+
+  template_picker(selected, existing_template, function(fields)
+    if #fields == 0 then
+      vim.notify("lazyissues: no fields selected, template unchanged", vim.log.levels.WARN)
+      if on_done then
+        on_done()
+      end
+      return
+    end
+    configure_enum_values(fields, function(configured)
+      finalize_template(data_root, configured, existing_template, on_done)
+    end)
+  end)
+end
+
 -- ── open ────────────────────────────────────────────────────────────────────
 
 -- Intro / setup screen shown when the repo has no Issues/ folder yet.
@@ -1797,7 +2226,25 @@ function M.offer_init()
       return
     end
     vim.notify("lazyissues: initialized " .. base, vim.log.levels.INFO)
-    M.open()
+    -- Show the template picker so the user can select which fields their issues use.
+    -- Pre-select the classic field set.
+    local classic = {}
+    for _, name in ipairs({ "Type", "Title", "Description", "Status", "Priority",
+      "SprintId", "Reporter", "Assignee", "Tags", "Comments", "ReleaseNoteType", "ReleaseNote" }) do
+      classic[name] = true
+    end
+    template_picker(classic, nil, function(fields)
+      if #fields == 0 then
+        -- User cancelled or selected nothing — use classic defaults.
+        M.open()
+        return
+      end
+      configure_enum_values(fields, function(configured)
+        finalize_template(base, configured, nil, function()
+          M.open()
+        end)
+      end)
+    end)
   end
   for _, k in ipairs({ "<CR>", "i" }) do
     vim.keymap.set("n", k, do_init, { buffer = b, nowait = true, silent = true })

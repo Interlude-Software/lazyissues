@@ -130,17 +130,31 @@ end
 -- Encode an issue table to canonical issue.json text (no trailing newline).
 -- Absent fields (Lua nil) fall back to backend defaults; an explicit vim.NIL
 -- (e.g. UpdatedAt) is preserved as null.
-function M.encode_issue(it)
-  return object(config.issue_fields, 0, function(key)
+-- If a template is provided, uses the template's field order; otherwise uses
+-- the hardcoded config.issue_fields order.
+function M.encode_issue(it, template)
+  local field_order
+  if template then
+    -- System fields first, then template fields in order.
+    field_order = { "Id" }
+    for _, f in ipairs(template.fields) do
+      field_order[#field_order + 1] = f.name
+    end
+    field_order[#field_order + 1] = "CreatedAt"
+    field_order[#field_order + 1] = "UpdatedAt"
+  else
+    field_order = config.issue_fields
+  end
+  return object(field_order, 0, function(key)
     -- Arrays sit at the field's indent (2), so their elements nest at 4 — matching
     -- System.Text.Json. (Empty [] hid this; non-empty Tags/Comments need it.)
-    if key == "Tags" then
-      return string_array(it.Tags, 2)
+    if key == "Tags" or key == "Labels" then
+      return string_array(it[key], 2)
     elseif key == "Comments" then
       return comments_array(it.Comments, 2)
     end
     local v = it[key]
-    if v == nil then
+    if v == nil and not template then
       v = config.issue_defaults[key]
     end
     return scalar(v)
@@ -162,6 +176,45 @@ end
 -- Decode JSON text, preserving nulls as vim.NIL (so UpdatedAt round-trips).
 function M.decode(text)
   return vim.json.decode(text, { luanil = { object = false, array = false } })
+end
+
+-- Encode a template to pretty-printed JSON.
+function M.encode_template(template)
+  local parts = { "{\n" }
+  parts[#parts + 1] = '  "fields": [\n'
+  for i, f in ipairs(template.fields) do
+    parts[#parts + 1] = "    {\n"
+    parts[#parts + 1] = '      "name": ' .. scalar(f.name) .. ",\n"
+    parts[#parts + 1] = '      "type": ' .. scalar(f.type) .. ",\n"
+    if f.values then
+      local vals = {}
+      for _, v in ipairs(f.values) do
+        vals[#vals + 1] = scalar(v)
+      end
+      parts[#parts + 1] = '      "values": [' .. table.concat(vals, ", ") .. "],\n"
+    end
+    -- Default: handle nil, tables, and scalars.
+    local def = f.default
+    if def == nil or def == vim.NIL then
+      parts[#parts + 1] = '      "default": null\n'
+    elseif type(def) == "table" then
+      if #def == 0 then
+        parts[#parts + 1] = '      "default": []\n'
+      else
+        local items = {}
+        for _, v in ipairs(def) do
+          items[#items + 1] = scalar(v)
+        end
+        parts[#parts + 1] = '      "default": [' .. table.concat(items, ", ") .. "]\n"
+      end
+    else
+      parts[#parts + 1] = '      "default": ' .. scalar(def) .. "\n"
+    end
+    parts[#parts + 1] = i < #template.fields and "    },\n" or "    }\n"
+  end
+  parts[#parts + 1] = "  ]\n"
+  parts[#parts + 1] = "}"
+  return table.concat(parts)
 end
 
 return M

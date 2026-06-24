@@ -39,7 +39,7 @@ local function blank(s)
   return s == nil or s == vim.NIL or vim.trim(tostring(s)) == ""
 end
 
--- The backend's only validation rule.
+-- The backend's only validation rule (only applies when those fields exist).
 function M.validate(it)
   if it.Status == "Closed" and it.ReleaseNoteType == "Public" and blank(it.ReleaseNote) then
     return false, "Cannot close an issue with a Public release note and an empty release note."
@@ -48,45 +48,53 @@ function M.validate(it)
 end
 
 -- Persist an issue table to <dir>/issue.json (whole-object write).
-function M.save_issue(dir, it)
-  if type(it.ReleaseNote) == "string" then
+-- If a template is provided, uses the template's field order for encoding.
+function M.save_issue(dir, it, template)
+  if it.ReleaseNote ~= nil and type(it.ReleaseNote) == "string" then
     it.ReleaseNote = vim.trim(it.ReleaseNote)
   end
   local ok, err = M.validate(it)
   if not ok then
     return false, err
   end
-  return write_file(dir .. "/issue.json", json.encode_issue(it))
+  return write_file(dir .. "/issue.json", json.encode_issue(it, template))
 end
 
 -- Create a new issue. `parent_dir` nil => top-level under Issues/. Returns id, dir.
+-- If a template exists, uses it for field defaults; otherwise falls back to hardcoded defaults.
 function M.create_issue(data_root, fields, parent_dir)
-  local id = uuid4()
-  local it = vim.tbl_extend("force", {
-    Id = id,
-    Type = config.issue_defaults.Type,
-    Title = "",
-    Description = "",
-    SprintId = config.empty_guid,
-    Status = config.issue_defaults.Status,
-    Priority = config.issue_defaults.Priority,
-    Reporter = "",
-    Assignee = "",
-    CreatedAt = now_iso(),
-    UpdatedAt = vim.NIL,
-    Tags = {},
-    Comments = {},
-    ReleaseNoteType = "None",
-    ReleaseNote = "",
-  }, fields or {})
-  it.Id = id -- never let caller override
+  local template = M.load_template(data_root)
+  local it, id
+  if template then
+    it, id = M.issue_from_template(template, fields)
+  else
+    id = uuid4()
+    it = vim.tbl_extend("force", {
+      Id = id,
+      Type = config.issue_defaults.Type,
+      Title = "",
+      Description = "",
+      SprintId = config.empty_guid,
+      Status = config.issue_defaults.Status,
+      Priority = config.issue_defaults.Priority,
+      Reporter = "",
+      Assignee = "",
+      CreatedAt = now_iso(),
+      UpdatedAt = vim.NIL,
+      Tags = {},
+      Comments = {},
+      ReleaseNoteType = "None",
+      ReleaseNote = "",
+    }, fields or {})
+    it.Id = id -- never let caller override
+  end
 
   local base = parent_dir or root.issues_dir(data_root)
   local dir = base .. "/" .. id
   if vim.fn.mkdir(dir, "p") == 0 then
     return nil, nil, "could not create issue directory"
   end
-  local ok, err = M.save_issue(dir, it)
+  local ok, err = M.save_issue(dir, it, template)
   if not ok then
     return nil, nil, err
   end
@@ -199,6 +207,129 @@ function M.delete_release(dir)
     return false, "delete failed"
   end
   return true
+end
+
+-- ── template ─────────────────────────────────────────────────────────────
+
+-- Load template.json from the data root. Returns the parsed table or nil.
+function M.load_template(data_root)
+  local path = data_root .. "/template.json"
+  local fd = io.open(path, "rb")
+  if not fd then
+    return nil
+  end
+  local text = fd:read("*a")
+  fd:close()
+  local ok, decoded = pcall(json.decode, text)
+  if not ok then
+    return nil
+  end
+  return decoded
+end
+
+-- Save a template table to Issues/template.json (pretty-printed).
+function M.save_template(data_root, template)
+  return write_file(data_root .. "/template.json", json.encode_template(template))
+end
+
+-- Build an issue table from the template (uses template fields + system fields).
+function M.issue_from_template(template, fields)
+  local id = uuid4()
+  local it = {
+    Id = id,
+    CreatedAt = now_iso(),
+    UpdatedAt = vim.NIL,
+  }
+  -- Apply template field defaults.
+  for _, f in ipairs(template.fields) do
+    local def = f.default
+    if def == vim.NIL then
+      def = nil
+    end
+    -- Deep-copy list defaults to avoid shared references.
+    if f.type == "list" and type(def) == "table" then
+      def = vim.deepcopy(def)
+    end
+    it[f.name] = def
+  end
+  -- Override with caller-provided fields.
+  if fields then
+    for k, v in pairs(fields) do
+      it[k] = v
+    end
+  end
+  it.Id = id -- never let caller override
+  return it, id
+end
+
+-- Backfill a field into all existing issues under data_root.
+function M.backfill_field(data_root, field_name, default_value)
+  local issues_dir = root.issues_dir(data_root)
+  local function walk(dir)
+    local handle = vim.uv.fs_scandir(dir)
+    if not handle then
+      return
+    end
+    while true do
+      local name, typ = vim.uv.fs_scandir_next(handle)
+      if not name then
+        break
+      end
+      if typ == "directory" then
+        local child = dir .. "/" .. name
+        local issue_path = child .. "/issue.json"
+        local fd = io.open(issue_path, "rb")
+        if fd then
+          local text = fd:read("*a")
+          fd:close()
+          local ok, it = pcall(json.decode, text)
+          if ok and it then
+            if it[field_name] == nil then
+              it[field_name] = default_value
+              M.save_issue(child, it)
+            end
+          end
+        end
+        walk(child)
+      end
+    end
+  end
+  walk(issues_dir)
+end
+
+-- Remove a field from all existing issues under data_root.
+function M.remove_field_from_issues(data_root, field_name)
+  local issues_dir = root.issues_dir(data_root)
+  local function walk(dir)
+    local handle = vim.uv.fs_scandir(dir)
+    if not handle then
+      return
+    end
+    while true do
+      local name, typ = vim.uv.fs_scandir_next(handle)
+      if not name then
+        break
+      end
+      if typ == "directory" then
+        local child = dir .. "/" .. name
+        local issue_path = child .. "/issue.json"
+        local fd = io.open(issue_path, "rb")
+        if fd then
+          local text = fd:read("*a")
+          fd:close()
+          local ok, it = pcall(json.decode, text)
+          if ok and it then
+            if it[field_name] ~= nil then
+              it[field_name] = nil
+              M.save_issue(child, it)
+            end
+          end
+        end
+        walk(child)
+      end
+    end
+  end
+  walk(issues_dir)
 end
 
 -- Move an issue dir under new_parent_dir (or to the issues root if nil).

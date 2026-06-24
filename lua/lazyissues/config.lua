@@ -43,6 +43,36 @@ M.comment_fields = { "Author", "Body", "CreatedAt" }
 M.sprint_fields = { "Id", "Name", "Description", "Status", "ReleaseId" }
 M.release_fields = { "Id", "Name", "Description", "Status" }
 
+-- Predefined fields available in the template picker (excludes system fields:
+-- Id, CreatedAt, UpdatedAt which are always present and auto-managed).
+-- Each entry: { name, type, default, values (for enums) }.
+M.predefined_fields = {
+  { name = "Type", type = "enum", default = "Task", values = { "Bug", "Feature", "Task", "Improvement" } },
+  { name = "Title", type = "string", default = "" },
+  { name = "Description", type = "string", default = "" },
+  { name = "Status", type = "enum", default = "Open", values = { "Open", "InProgress", "Resolved", "Closed" } },
+  { name = "Priority", type = "enum", default = "Medium", values = { "Low", "Medium", "High", "Critical" } },
+  { name = "SprintId", type = "string", default = M.empty_guid },
+  { name = "Reporter", type = "string", default = "" },
+  { name = "Assignee", type = "string", default = "" },
+  { name = "Tags", type = "list", default = {} },
+  { name = "Comments", type = "list", default = {} },
+  { name = "ReleaseNoteType", type = "enum", default = "None", values = { "None", "Public" } },
+  { name = "ReleaseNote", type = "string", default = "" },
+  { name = "DueDate", type = "date", default = nil },
+  { name = "Estimate", type = "number", default = nil },
+  { name = "Labels", type = "list", default = {} },
+  { name = "Environment", type = "enum", default = nil, values = { "Dev", "Staging", "Prod" } },
+  { name = "Severity", type = "enum", default = nil, values = { "Cosmetic", "Minor", "Major", "Critical" } },
+  { name = "Resolution", type = "enum", default = nil, values = { "Fixed", "WontFix", "Duplicate", "CannotReproduce" } },
+}
+
+-- Lookup predefined field definition by name.
+M.predefined_field_map = {}
+for _, f in ipairs(M.predefined_fields) do
+  M.predefined_field_map[f.name] = f
+end
+
 -- Display labels and colors mirrored from the web UI (for later TUI rendering).
 M.status_label = {
   Open = "Open",

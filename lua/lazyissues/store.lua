@@ -80,7 +80,14 @@ function M.load(data_root)
     sprints = {}, -- { {id, ...sprint fields} }
     releases = {}, -- { {id, ...release fields} }
     index = {}, -- id -> node (flattened, all depths)
+    template = nil, -- loaded template or nil
   }
+
+  -- Template (optional).
+  local tmpl = read_json(data_root .. "/template.json")
+  if tmpl then
+    model.template = tmpl
+  end
 
   -- Issues (tree)
   local issues_dir = root.issues_dir(data_root)
