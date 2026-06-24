@@ -990,25 +990,114 @@ local function change_parent_action(V)
     return
   end
   local prefix = node.path .. "/"
-  local items, map = { "(root)" }, {}
+
+  -- Build the full candidate list: (root) + all valid targets.
+  local all_items = { { label = "(root)", node = nil } }
   local function collect(list)
     for _, c in ipairs(list) do
       local is_self = c.id == node.id
       local is_desc = c.path:sub(1, #prefix) == prefix
       if not is_self and not is_desc then
-        local label = string.rep("  ", c.depth) .. (c.issue and c.issue.Title or c.id):sub(1, 40)
-        items[#items + 1] = label
-        map[label] = c
+        local indent = string.rep("  ", c.depth)
+        local title = (c.issue and c.issue.Title or c.id):sub(1, 50)
+        all_items[#all_items + 1] = { label = indent .. title, title_lower = title:lower(), node = c }
       end
       collect(c.children)
     end
   end
   collect(V.model.issues)
-  vim.ui.select(items, { prompt = "New parent:" }, function(choice)
-    if not choice then
+
+  local Popup = require("nui.popup")
+  local Layout = require("nui.layout")
+
+  local top = NuiLine()
+  top:append(" lazyissues ", "LazyIssuesBorder")
+  top:append("reparent", "FloatTitle")
+  top:append(" ", "LazyIssuesBorder")
+  local bottom = NuiLine()
+  bottom:append(" type to filter · enter select · q cancel ", "LazyIssuesBorder")
+
+  local input_pop = Popup({
+    border = { style = "rounded", text = { top = " Filter ", top_align = "left" } },
+    buf_options = { modifiable = true, filetype = "" },
+    win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder" },
+  })
+  local list_pop = Popup({
+    border = {
+      style = "rounded",
+      text = { bottom = bottom, bottom_align = "center" },
+    },
+    buf_options = { modifiable = false, filetype = "lazyissues" },
+    win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder", cursorline = true },
+  })
+
+  local layout = Layout(
+    {
+      relative = "editor",
+      position = "50%",
+      size = { width = 64, height = math.min(#all_items + 6, 30) },
+      zindex = 60,
+    },
+    Layout.Box({
+      Layout.Box(input_pop, { size = 3 }),
+      Layout.Box(list_pop, { grow = 1 }),
+    }, { dir = "col" })
+  )
+  layout:mount()
+
+  local filtered = vim.deepcopy(all_items)
+  local function redraw_list()
+    local lines = {}
+    for _, item in ipairs(filtered) do
+      lines[#lines + 1] = "  " .. item.label
+    end
+    if #lines == 0 then
+      lines = { "  (no matches)" }
+    end
+    vim.bo[list_pop.bufnr].modifiable = true
+    vim.api.nvim_buf_set_lines(list_pop.bufnr, 0, -1, false, lines)
+    vim.bo[list_pop.bufnr].modifiable = false
+    vim.api.nvim_buf_clear_namespace(list_pop.bufnr, ns, 0, -1)
+    -- Highlight (root) entry differently.
+    if #filtered > 0 and filtered[1].node == nil then
+      vim.api.nvim_buf_add_highlight(list_pop.bufnr, ns, "LazyIssuesLabel", 0, 0, -1)
+    end
+  end
+
+  local function filter(text)
+    text = (text or ""):lower()
+    if text == "" then
+      filtered = vim.deepcopy(all_items)
+    else
+      filtered = {}
+      for _, item in ipairs(all_items) do
+        if item.node == nil or (item.title_lower and item.title_lower:find(text, 1, true)) then
+          filtered[#filtered + 1] = item
+        end
+      end
+    end
+    redraw_list()
+    -- Reset cursor to top of list.
+    if list_pop.winid and vim.api.nvim_win_is_valid(list_pop.winid) then
+      pcall(vim.api.nvim_win_set_cursor, list_pop.winid, { 1, 0 })
+    end
+  end
+
+  local function cleanup()
+    pcall(function() layout:unmount() end)
+  end
+
+  local function confirm()
+    local row = 1
+    if list_pop.winid and vim.api.nvim_win_is_valid(list_pop.winid) then
+      row = vim.api.nvim_win_get_cursor(list_pop.winid)[1]
+    end
+    local item = filtered[row]
+    cleanup()
+    if not item then
       return
     end
-    local target = map[choice]
+    local target = item.node
     local ok, err = actions.change_parent(V.root, node.path, node.id, target and target.path or nil)
     if not ok then
       vim.notify("lazyissues: " .. tostring(err), vim.log.levels.ERROR)
@@ -1018,6 +1107,65 @@ local function change_parent_action(V)
       V.expanded[target.id] = true
     end
     reload_select(V, node.id)
+  end
+
+  -- Input buffer: filter as you type.
+  redraw_list()
+  vim.api.nvim_set_current_win(input_pop.winid)
+  vim.cmd("startinsert")
+
+  vim.api.nvim_create_autocmd("TextChangedI", {
+    buffer = input_pop.bufnr,
+    callback = function()
+      local text = vim.api.nvim_buf_get_lines(input_pop.bufnr, 0, 1, false)[1] or ""
+      filter(text)
+    end,
+  })
+
+  -- Keymaps for the input buffer.
+  local ib = input_pop.bufnr
+  local function map_input(lhs, fn)
+    vim.keymap.set({ "n", "i" }, lhs, fn, { buffer = ib, nowait = true, silent = true })
+  end
+  map_input("<CR>", confirm)
+  map_input("<Esc>", function()
+    vim.cmd("stopinsert")
+    cleanup()
+  end)
+  -- Navigate the list from the input buffer.
+  map_input("<Down>", function()
+    if list_pop.winid and vim.api.nvim_win_is_valid(list_pop.winid) then
+      local row = vim.api.nvim_win_get_cursor(list_pop.winid)[1]
+      local max = #filtered
+      if row < max then
+        pcall(vim.api.nvim_win_set_cursor, list_pop.winid, { row + 1, 0 })
+      end
+    end
+  end)
+  map_input("<Up>", function()
+    if list_pop.winid and vim.api.nvim_win_is_valid(list_pop.winid) then
+      local row = vim.api.nvim_win_get_cursor(list_pop.winid)[1]
+      if row > 1 then
+        pcall(vim.api.nvim_win_set_cursor, list_pop.winid, { row - 1, 0 })
+      end
+    end
+  end)
+  map_input("<C-j>", function()
+    if list_pop.winid and vim.api.nvim_win_is_valid(list_pop.winid) then
+      local row = vim.api.nvim_win_get_cursor(list_pop.winid)[1]
+      local max = #filtered
+      if row < max then
+        pcall(vim.api.nvim_win_set_cursor, list_pop.winid, { row + 1, 0 })
+      end
+    end
+  end)
+  map_input("<C-k>", function()
+    if list_pop.winid and vim.api.nvim_win_is_valid(list_pop.winid) then
+      local row = vim.api.nvim_win_get_cursor(list_pop.winid)[1]
+      if row > 1 then
+        pcall(vim.api.nvim_win_set_cursor, list_pop.winid, { row - 1, 0 })
+      end
+    end
   end)
 end
 
