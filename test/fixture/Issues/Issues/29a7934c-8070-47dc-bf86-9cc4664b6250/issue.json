@@ -1,0 +1,26 @@
+{
+  "Id": "29a7934c-8070-47dc-bf86-9cc4664b6250",
+  "Type": "Feature",
+  "Title": "Backend caching system",
+  "Description": "",
+  "SprintId": "5b13e481-7144-4554-853b-1421399894c4",
+  "Status": "Open",
+  "Priority": "High",
+  "Reporter": "",
+  "Assignee": "",
+  "CreatedAt": "2026-06-24T20:32:57.0000000Z",
+  "UpdatedAt": null,
+  "Tags": [
+    "backend",
+    "perf"
+  ],
+  "Comments": [
+    {
+      "Author": "David",
+      "Body": "Lets start with an in-memory layer.",
+      "CreatedAt": "2026-06-24T20:32:57.0000000Z"
+    }
+  ],
+  "ReleaseNoteType": "None",
+  "ReleaseNote": ""
+}
