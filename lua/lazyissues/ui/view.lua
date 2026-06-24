@@ -323,19 +323,53 @@ end
 
 local function render_issues(V)
   V.rows = compute_rows(V)
-  local lines, gutters = {}, {}
-  for _, r in ipairs(V.rows) do
+
+  -- Pre-compute "is last sibling" for each row so we can draw tree connectors.
+  local is_last = {}
+  for i = 1, #V.rows do
+    is_last[i] = true -- assume last until a later sibling at the same depth proves otherwise
+    for j = i + 1, #V.rows do
+      if V.rows[j].depth < V.rows[i].depth then break end
+      if V.rows[j].depth == V.rows[i].depth then
+        is_last[i] = false
+        break
+      end
+    end
+  end
+
+  -- Track which ancestor levels have a continuing branch (for │ lines).
+  -- continues[depth] = true means there's a non-last ancestor at that depth.
+  local continues = {}
+
+  local lines, meta = {}, {}
+  for i, r in ipairs(V.rows) do
     local n = r.node
     local it = n.issue or {}
     -- Left gutter: branch-edit marker (bright = this issue, dim = a descendant).
     local gut = n._changed and "▌" or (n._changed_desc and "▏" or " ")
-    gutters[#gutters + 1] = n._changed and "LazyIssuesChanged"
+    local gut_hl = n._changed and "LazyIssuesChanged"
       or (n._changed_desc and "LazyIssuesChangedDim" or nil)
-    local indent = string.rep("  ", r.depth)
-    local marker = r.has_children and (r.expanded and "▾ " or "▸ ") or "  "
+
+    -- Build tree connector prefix.
+    local tree = ""
+    if r.depth > 0 then
+      -- Ancestor continuation lines.
+      for d = 1, r.depth - 1 do
+        tree = tree .. (continues[d] and "│   " or "    ")
+      end
+      -- This node's connector.
+      tree = tree .. (is_last[i] and "└── " or "├── ")
+    end
+    -- Update continuation tracking for children.
+    continues[r.depth] = not is_last[i]
+    -- Clear deeper levels.
+    for d = r.depth + 1, 10 do continues[d] = nil end
+
+    local marker = r.has_children and (r.expanded and "▾ " or "▸ ") or ""
     local glyph = icons.glyph(it.Status)
-    lines[#lines + 1] =
-      string.format("%s %s%s%s %s", gut, indent, marker, glyph, it.Title or "(untitled)")
+    local prefix = gut .. " " .. tree .. marker
+    lines[#lines + 1] = prefix .. glyph .. " " .. (it.Title or "(untitled)")
+    meta[#meta + 1] = { gut_hl = gut_hl, prefix_len = #prefix }
   end
   if #lines == 0 then
     lines = { "  (no issues in scope)" }
@@ -344,12 +378,13 @@ local function render_issues(V)
   vim.api.nvim_buf_clear_namespace(V.issues.bufnr, ns, 0, -1)
   for i, r in ipairs(V.rows) do
     local status = (r.node.issue or {}).Status
-    local gut = gutters[i]
-    local gut_len = gut and 3 or 1 -- "▌"/"▏" are 3 bytes; the blank gutter is 1
-    if gut then
-      hl(V.issues.bufnr, gut, i - 1, 0, gut_len)
+    local m = meta[i]
+    if m.gut_hl then
+      hl(V.issues.bufnr, m.gut_hl, i - 1, 0, 3) -- gutter char is 3 bytes
     end
-    hl(V.issues.bufnr, icons.status_hl[status] or "Normal", i - 1, gut_len, -1)
+    -- Apply status highlight from the glyph onwards so strikethrough
+    -- doesn't extend across the leading gutter/indent area.
+    hl(V.issues.bufnr, icons.status_hl[status] or "Normal", i - 1, m.prefix_len, -1)
   end
 end
 
