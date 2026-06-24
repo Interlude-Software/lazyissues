@@ -1923,6 +1923,7 @@ local function template_picker(selected, existing_template, on_done)
 
   local pop = Popup({
     enter = true,
+    relative = "editor",
     border = {
       style = "rounded",
       text = {
@@ -1931,9 +1932,11 @@ local function template_picker(selected, existing_template, on_done)
         bottom = bottom,
         bottom_align = "center",
       },
+      highlight = "LazyIssuesBorder",
     },
     position = "50%",
     size = { width = 64, height = #fields + 4 },
+    zindex = 60,
     buf_options = { modifiable = false, filetype = "lazyissues-picker" },
     win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder", cursorline = true },
   })
