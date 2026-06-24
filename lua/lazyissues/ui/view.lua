@@ -2009,12 +2009,19 @@ local function template_picker(selected, existing_template, on_done)
   pcall(vim.api.nvim_win_set_cursor, pop.winid, { offset + 1, 0 })
 end
 
--- Prompt for enum values for all enum fields in the selected list.
+-- Prompt for enum values for enum fields in the selected list.
+-- If `existing_template` is provided, only prompts for newly added enums.
 -- Calls on_done(fields) with the fields updated with user-chosen values.
-local function configure_enum_values(selected_fields, on_done)
+local function configure_enum_values(selected_fields, existing_template, on_done)
+  local existing_set = {}
+  if existing_template then
+    for _, f in ipairs(existing_template.fields) do
+      existing_set[f.name] = true
+    end
+  end
   local enums = {}
   for _, f in ipairs(selected_fields) do
-    if f.type == "enum" then
+    if f.type == "enum" and not existing_set[f.name] then
       enums[#enums + 1] = f
     end
   end
@@ -2183,7 +2190,7 @@ edit_template_flow = function(data_root, existing_template, on_done)
       end
       return
     end
-    configure_enum_values(fields, function(configured)
+    configure_enum_values(fields, existing_template, function(configured)
       finalize_template(data_root, configured, existing_template, on_done)
     end)
   end)
@@ -2258,7 +2265,7 @@ function M.offer_init()
         M.open()
         return
       end
-      configure_enum_values(fields, function(configured)
+      configure_enum_values(fields, nil, function(configured)
         finalize_template(base, configured, nil, function()
           M.open()
         end)
