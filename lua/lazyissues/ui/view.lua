@@ -419,13 +419,12 @@ local function render_detail(V, node)
 
   add("")
   add(string.format("  #%s   %s", short(it.Id), val(it.Type)), "LazyIssuesHeader")
-  for _, tl in ipairs(wrap(it.Title or "", width)) do
-    add("  " .. tl, "LazyIssuesHeader")
-  end
+  add("  " .. string.rep("─", width))
+  local title_li = add(string.format("  %-10s %s", "Title", val(it.Title)))
+  hls[#hls + 1] = { "LazyIssuesLabel", title_li, 2, 12 }
   if node._changed then
     add("  ✎ edited on this branch", "LazyIssuesChanged")
   end
-  add("")
   add("  " .. string.rep("─", width))
 
   -- Progress bar for issues with sub-issues (% of descendants complete).
