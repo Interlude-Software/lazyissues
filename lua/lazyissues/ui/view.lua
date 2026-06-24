@@ -389,7 +389,7 @@ local function render_detail(V, node)
   if node._changed then
     add("  ✎ edited on this branch", "LazyIssuesChanged")
   end
-  add("  " .. string.rep("─", 28))
+  add("  " .. string.rep("─", width))
 
   -- Progress bar for issues with sub-issues (% of descendants complete).
   if #node.children > 0 then
@@ -461,13 +461,13 @@ local function render_detail(V, node)
   end
 
   if has_desc then
-    add("  " .. string.rep("─", 28))
+    add("  " .. string.rep("─", width))
     add("  Description", "LazyIssuesLabel")
     for _, dl in ipairs(wrap(it.Description or "", width - 2)) do
       add("    " .. dl)
     end
   end
-  add("  " .. string.rep("─", 28))
+  add("  " .. string.rep("─", width))
   local footer_parts = {}
   if has_comments then
     footer_parts[#footer_parts + 1] = string.format("Comments (%d)", (it.Comments and #it.Comments) or 0)
