@@ -1014,33 +1014,36 @@ local function change_parent_action(V)
   top:append(" lazyissues ", "LazyIssuesBorder")
   top:append("reparent", "FloatTitle")
   top:append(" ", "LazyIssuesBorder")
-  local bottom = NuiLine()
-  bottom:append(" type to filter · enter select · q cancel ", "LazyIssuesBorder")
 
-  local input_pop = Popup({
-    border = { style = "rounded", text = { top = " Filter ", top_align = "left" } },
-    buf_options = { modifiable = true, filetype = "" },
-    win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder" },
-  })
   local list_pop = Popup({
     border = {
       style = "rounded",
-      text = { bottom = bottom, bottom_align = "center" },
+      text = { top = top, top_align = "center" },
+      highlight = "LazyIssuesBorder",
     },
     buf_options = { modifiable = false, filetype = "lazyissues" },
     win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder", cursorline = true },
   })
+  local input_pop = Popup({
+    border = {
+      style = { "├", "─", "┤", "│", "╯", "─", "╰", "│" },
+      highlight = "LazyIssuesBorder",
+    },
+    buf_options = { modifiable = true, filetype = "" },
+    win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder" },
+  })
 
+  local total_h = math.min(#all_items + 6, 30)
   local layout = Layout(
     {
       relative = "editor",
       position = "50%",
-      size = { width = 64, height = math.min(#all_items + 6, 30) },
+      size = { width = 64, height = total_h },
       zindex = 60,
     },
     Layout.Box({
-      Layout.Box(input_pop, { size = 3 }),
       Layout.Box(list_pop, { grow = 1 }),
+      Layout.Box(input_pop, { size = 3 }),
     }, { dir = "col" })
   )
   layout:mount()
