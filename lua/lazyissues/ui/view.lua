@@ -774,7 +774,7 @@ local function multiline_input(label, initial, on_accept, on_close)
     position = "50%",
     size = { width = "60%", height = "40%" },
     buf_options = { modifiable = true, filetype = "markdown" },
-    win_options = { winhighlight = "Normal:Normal,FloatBorder:FloatBorder", wrap = true },
+    win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder", wrap = true },
   })
   pop:mount()
   vim.api.nvim_buf_set_lines(pop.bufnr, 0, -1, false, vim.split(tostring(initial or ""), "\n", { plain = true }))
@@ -845,7 +845,7 @@ local function comments_view(V, on_close)
     position = "50%",
     size = { width = "60%", height = "60%" },
     buf_options = { modifiable = false, filetype = "lazyissues-comments" },
-    win_options = { winhighlight = "Normal:Normal,FloatBorder:FloatBorder", cursorline = true, wrap = true },
+    win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder", cursorline = true, wrap = true },
   })
   pop:mount()
 
@@ -1229,7 +1229,7 @@ local function edit_menu(V)
       style = "rounded",
       text = { top = " Edit issue ", top_align = "center", bottom = " ↵ select · q close ", bottom_align = "center" },
     },
-    win_options = { winhighlight = "Normal:Normal,FloatBorder:FloatBorder,CursorLine:PmenuSel" },
+    win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder,CursorLine:PmenuSel" },
   }, {
     lines = lines,
     keymap = {
@@ -1352,7 +1352,7 @@ local function sprint_edit_menu(V)
       style = "rounded",
       text = { top = " Edit sprint ", top_align = "center", bottom = " ↵ select · q close ", bottom_align = "center" },
     },
-    win_options = { winhighlight = "Normal:Normal,FloatBorder:FloatBorder,CursorLine:PmenuSel" },
+    win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder,CursorLine:PmenuSel" },
   }, {
     lines = lines,
     keymap = {
@@ -1479,7 +1479,7 @@ local function release_notes_preview(V, rel, on_close)
     position = "50%",
     size = { width = "60%", height = "60%" },
     buf_options = { modifiable = false, filetype = "markdown" },
-    win_options = { winhighlight = "Normal:Normal,FloatBorder:FloatBorder", wrap = true },
+    win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder", wrap = true },
   })
   pop:mount()
   set_lines(pop.bufnr, lines)
@@ -1636,7 +1636,7 @@ local function release_edit_menu(V)
       style = "rounded",
       text = { top = " Edit release ", top_align = "center", bottom = " ↵ select · q close ", bottom_align = "center" },
     },
-    win_options = { winhighlight = "Normal:Normal,FloatBorder:FloatBorder,CursorLine:PmenuSel" },
+    win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder,CursorLine:PmenuSel" },
   }, {
     lines = lines,
     keymap = {
@@ -1856,7 +1856,7 @@ function M.help()
     position = "50%",
     size = { width = 68, height = #lines },
     buf_options = { modifiable = false, filetype = "lazyissues-help" },
-    win_options = { winhighlight = "Normal:Normal,FloatBorder:FloatBorder" },
+    win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder" },
   })
   pop:mount()
   set_lines(pop.bufnr, lines)
@@ -1928,7 +1928,7 @@ local function template_picker(selected, existing_template, on_done)
     position = "50%",
     size = { width = 64, height = #fields + 4 },
     buf_options = { modifiable = false, filetype = "lazyissues-picker" },
-    win_options = { winhighlight = "Normal:Normal,FloatBorder:FloatBorder", cursorline = true },
+    win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder", cursorline = true },
   })
   pop:mount()
 
@@ -2215,7 +2215,7 @@ function M.offer_init()
     position = "50%",
     size = { width = math.max(56, #repo + 16), height = #lines },
     buf_options = { modifiable = false, filetype = "lazyissues-intro" },
-    win_options = { winhighlight = "Normal:Normal,FloatBorder:FloatBorder" },
+    win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder" },
   })
   pop:mount()
   set_lines(pop.bufnr, lines)
@@ -2291,7 +2291,7 @@ function M.open()
       },
       focusable = true,
       buf_options = { modifiable = false, filetype = "lazyissues" },
-      win_options = { cursorline = true, winhighlight = "Normal:Normal,FloatBorder:FloatBorder" },
+      win_options = { cursorline = true, winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder" },
     })
   end
 

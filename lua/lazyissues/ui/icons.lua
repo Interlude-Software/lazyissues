@@ -54,6 +54,8 @@ function M.setup()
     LazyIssuesChangedDim = { fg = "#8a7a55" },
     -- Footer shortcut bar — brighter than Comment so it reads clearly.
     LazyIssuesFooter = { fg = "#b8c0e0" },
+    -- White border for all popups.
+    LazyIssuesBorder = { fg = "#ffffff" },
   }
   for name, spec in pairs(hl) do
     spec.default = true
