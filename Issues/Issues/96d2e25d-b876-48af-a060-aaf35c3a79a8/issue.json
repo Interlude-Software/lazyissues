@@ -1,0 +1,17 @@
+{
+  "Id": "96d2e25d-b876-48af-a060-aaf35c3a79a8",
+  "Type": "Feature",
+  "Title": "Add field to template with backfill",
+  "Description": "When adding a new field to the template, the user is always prompted for a default value. All existing issues are then backfilled with that default value for the new field.",
+  "SprintId": "00000000-0000-0000-0000-000000000000",
+  "Status": "Open",
+  "Priority": "High",
+  "Reporter": "",
+  "Assignee": "",
+  "CreatedAt": "2026-06-24T21:00:06.0000000Z",
+  "UpdatedAt": null,
+  "Tags": ["template", "migration"],
+  "Comments": [],
+  "ReleaseNoteType": "None",
+  "ReleaseNote": ""
+}

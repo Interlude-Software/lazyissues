@@ -1,0 +1,17 @@
+{
+  "Id": "fd098856-dfad-46dc-b19a-41012e04956d",
+  "Type": "Feature",
+  "Title": "Field type system",
+  "Description": "Each field in the template has a type: string, number, date, enum, or list. The TUI uses this to render the appropriate editor for user-editable fields (text input for strings, number input for numbers, enum selector for enums, list editor for lists). Date fields are system-managed and not directly edited by users.",
+  "SprintId": "00000000-0000-0000-0000-000000000000",
+  "Status": "Open",
+  "Priority": "High",
+  "Reporter": "",
+  "Assignee": "",
+  "CreatedAt": "2026-06-24T21:00:02.0000000Z",
+  "UpdatedAt": null,
+  "Tags": ["schema", "types"],
+  "Comments": [],
+  "ReleaseNoteType": "None",
+  "ReleaseNote": ""
+}

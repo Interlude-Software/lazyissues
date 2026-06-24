@@ -1,0 +1,17 @@
+{
+  "Id": "0ff39db8-8860-4893-bf45-27a43eb3b3f8",
+  "Type": "Feature",
+  "Title": "Editable template",
+  "Description": "The user can re-open the template editor at any time to add or remove fields from the issue schema. The same TUI checklist used during init is available for editing the template later.",
+  "SprintId": "00000000-0000-0000-0000-000000000000",
+  "Status": "Open",
+  "Priority": "High",
+  "Reporter": "",
+  "Assignee": "",
+  "CreatedAt": "2026-06-24T21:00:05.0000000Z",
+  "UpdatedAt": null,
+  "Tags": ["template", "editing"],
+  "Comments": [],
+  "ReleaseNoteType": "None",
+  "ReleaseNote": ""
+}

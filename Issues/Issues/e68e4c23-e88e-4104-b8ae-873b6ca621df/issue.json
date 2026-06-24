@@ -1,0 +1,17 @@
+{
+  "Id": "e68e4c23-e88e-4104-b8ae-873b6ca621df",
+  "Type": "Feature",
+  "Title": "Remove field from template with prompt",
+  "Description": "When removing a field from the template, the user is prompted whether to delete the field data from all existing issues or leave it as orphaned data in the JSON files.",
+  "SprintId": "00000000-0000-0000-0000-000000000000",
+  "Status": "Open",
+  "Priority": "High",
+  "Reporter": "",
+  "Assignee": "",
+  "CreatedAt": "2026-06-24T21:00:07.0000000Z",
+  "UpdatedAt": null,
+  "Tags": ["template", "migration"],
+  "Comments": [],
+  "ReleaseNoteType": "None",
+  "ReleaseNote": ""
+}

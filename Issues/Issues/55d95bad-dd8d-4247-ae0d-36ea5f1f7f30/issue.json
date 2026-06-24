@@ -1,0 +1,17 @@
+{
+  "Id": "55d95bad-dd8d-4247-ae0d-36ea5f1f7f30",
+  "Type": "Feature",
+  "Title": "Enum constraints in template",
+  "Description": "Enum fields store their allowed values in the template (e.g. Status: [\"Open\", \"In Progress\", \"Done\"]). During init, when a user selects an enum field, they also define the allowed values. The TUI enforces these constraints when editing an issue.",
+  "SprintId": "00000000-0000-0000-0000-000000000000",
+  "Status": "Open",
+  "Priority": "High",
+  "Reporter": "",
+  "Assignee": "",
+  "CreatedAt": "2026-06-24T21:00:03.0000000Z",
+  "UpdatedAt": null,
+  "Tags": ["schema", "enum", "validation"],
+  "Comments": [],
+  "ReleaseNoteType": "None",
+  "ReleaseNote": ""
+}
