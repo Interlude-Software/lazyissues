@@ -273,7 +273,7 @@ local function render_sprints(V)
   for _, sp in ipairs(V.model.sprints) do
     local c = V.counts.by_sprint[sp.Id] or { all = 0, open = 0, closed = 0 }
     local expanded = V.sprint_expanded[sp.Id]
-    local marker = expanded and "▾ " or "▸ "
+    local marker = expanded and "▼ " or "▶ "
     -- A sprint header is "active" when its scope is selected but not collapsed
     -- into a specific category row.
     local header_active = sel and sel.id == sp.Id and (not expanded)
@@ -365,7 +365,7 @@ local function render_issues(V)
     -- Clear deeper levels.
     for d = r.depth + 1, 10 do continues[d] = nil end
 
-    local marker = r.has_children and (r.expanded and "▾ " or "▸ ") or ""
+    local marker = r.has_children and (r.expanded and "▼ " or "▶ ") or ""
     local glyph = icons.glyph(it.Status)
     local prefix = gut .. " " .. tree .. marker
     lines[#lines + 1] = prefix .. glyph .. " " .. (it.Title or "(untitled)")
