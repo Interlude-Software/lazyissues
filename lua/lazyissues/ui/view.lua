@@ -418,7 +418,7 @@ local function render_detail(V, node)
   end
 
   add("")
-  add(string.format("  #%s   %s", short(it.Id), val(it.Type)), "LazyIssuesHeader")
+  add(string.format("  %s   %s", val(it.Id), val(it.Type)), "LazyIssuesHeader")
   add("  " .. string.rep("─", width))
   local title_li = add(string.format("  %-10s %s", "Title", val(it.Title)))
   hls[#hls + 1] = { "LazyIssuesLabel", title_li, 2, 12 }
