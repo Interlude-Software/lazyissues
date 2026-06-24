@@ -2157,6 +2157,12 @@ edit_template_flow = function(data_root, existing_template, on_done)
     for _, f in ipairs(existing_template.fields) do
       selected[f.name] = true
     end
+  else
+    -- No template yet: pre-select the classic field set.
+    for _, name in ipairs({ "Type", "Title", "Description", "Status", "Priority",
+      "SprintId", "Reporter", "Assignee", "Tags", "Comments", "ReleaseNoteType", "ReleaseNote" }) do
+      selected[name] = true
+    end
   end
 
   template_picker(selected, existing_template, function(fields)
