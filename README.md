@@ -7,18 +7,15 @@ folder in your repo. `lazyissues` browses and edits them directly — no server,
 no API, no database. Because the data is plain files in the repo, your issues
 branch, diff, review and merge exactly like code.
 
-> Status: **v0.1** — works against the on-disk format below. A configurable
-> field *schema* (so you can adapt it to your own tracker) is on the roadmap.
-
 ```
 ┌─ Issues — myrepo ──────────────────────────────────────────────────────────┐
 │ [1] Scopes    │ [4] Issues  (All)              │ [5] Detail                  │
-│ › All   (50)  │ ▾ ● Backend caching     [75%]  │ #a1b2c3  Task               │
-│   Open  (15)  │     ✓ add cache layer          │ Backend caching system      │
-│   Backlog     │     ● invalidation             │ ───────────────             │
-│ [2] Sprints   │   ★ Sub-issue support          │ Status    Open              │
-│ › Next  (12)  │   ◷ Fix radius in screen space │ Priority  High              │
-│ [3] Releases  │                                │ Sprint    Next              │
+│ › All   (50)  │ ├── ● Backend caching   [75%]  │ a1b2c3d4-...   Task         │
+│   Open  (15)  │ │   ├── ✓ add cache layer      │ ─────────────────           │
+│   Backlog     │ │   └── ● invalidation         │ Title     Backend caching   │
+│ [2] Sprints   │ ├── ● Sub-issue support        │ ─────────────────           │
+│ ▶ Next  (12)  │ └── ● Fix radius               │ Status    Open              │
+│ [3] Releases  │                                │ Priority  High              │
 │   (none)      │                                │ Comments (2)  Children (3)  │
 ├───────────────┴────────────────────────────────┴─────────────────────────────┤
 │  e edit   c comments   o new   O child   D del   P re-parent   / find   ? help│
@@ -28,7 +25,12 @@ branch, diff, review and merge exactly like code.
 ## Features
 
 - **lazygit-style panels** — Scopes / Sprints / Releases on the left, an issue
-  **tree** (with nested sub-issues) in the centre, a detail pane on the right.
+  **tree** (with nested sub-issues and classic connectors) in the centre, a
+  detail pane on the right.
+- **Customisable schema** — on first init, pick which fields your issues have
+  from a predefined list (or edit the template later with `E`). Enum fields
+  store their allowed values. Adding a field backfills existing issues;
+  removing one prompts whether to delete the data.
 - **Full CRUD** — create / edit / delete issues, sub-issues, comments, sprints
   and releases, all from a discoverable edit menu (`e`).
 - **Faithful, idempotent writes** — files are serialized to match the canonical
@@ -69,7 +71,8 @@ branch, diff, review and merge exactly like code.
 ## Usage
 
 Open the tracker for the current repo with `:LazyIssues` (or `<leader>i`). If the
-repo has no `Issues/` folder yet, you'll be offered a one-key setup screen.
+repo has no `Issues/` folder yet, you'll be offered a setup screen where you
+choose which fields your issues should have.
 
 ### Keymaps (inside the UI)
 
@@ -79,12 +82,53 @@ repo has no `Issues/` folder yet, you'll be offered a one-key setup screen.
 | `j` `k` | move · `<Space>` expand/collapse sub-issues |
 | `<CR>` | select scope/sprint/release · open issue |
 | `/` | search by title · `r` reload · `?` help · `q` quit |
+| `E` | **edit template** (add/remove fields, configure enums) |
 | **Issues:** `e` | **edit menu** (all fields + actions) |
 | `c` | comments (add/delete) |
 | `o` / `O` | new issue / new child issue |
-| `D` / `P` | delete / re-parent |
+| `D` / `P` | delete / re-parent (with filterable picker) |
 | quick: `s` `p` `t` `a` `m` | status / priority / type / assignee / sprint |
 | **Sprints/Releases:** `o` / `e` | new / edit (status, sprint links, notes) |
+
+## Template
+
+When you initialise a new project, `lazyissues` saves your field choices to
+`Issues/template.json`. This file defines which fields each issue has, their
+types, and allowed values for enum fields.
+
+Press `E` at any time to edit the template. When you add a field, you'll be
+prompted for a default value and all existing issues are backfilled. When you
+remove a field, you choose whether to delete the data from existing issues or
+keep it.
+
+The template is optional — without one, `lazyissues` uses a classic set of
+hardcoded fields.
+
+### Predefined fields
+
+| Field | Type | Default values |
+|-------|------|----------------|
+| Type | enum | Bug, Feature, Task, Improvement |
+| Title | string | |
+| Description | string | |
+| Status | enum | Open, InProgress, Resolved, Closed |
+| Priority | enum | Low, Medium, High, Critical |
+| SprintId | string | |
+| Reporter | string | |
+| Assignee | string | |
+| Tags | list | |
+| Comments | list | |
+| ReleaseNoteType | enum | None, Public |
+| ReleaseNote | string | |
+| DueDate | date | (system-managed) |
+| Estimate | number | |
+| Labels | list | |
+| Environment | enum | Dev, Staging, Prod |
+| Severity | enum | Cosmetic, Minor, Major, Critical |
+| Resolution | enum | Fixed, WontFix, Duplicate, CannotReproduce |
+
+System fields (`Id`, `CreatedAt`, `UpdatedAt`) are always present and
+auto-managed.
 
 ## On-disk format
 
@@ -92,21 +136,11 @@ repo has no `Issues/` folder yet, you'll be offered a one-key setup screen.
 
 ```
 Issues/
-  Issues/<guid>/issue.json            # an issue
-  Issues/<guid>/<guid>/issue.json     # a sub-issue (folder nesting, any depth)
+  template.json                         # field schema (optional)
+  Issues/<guid>/issue.json              # an issue
+  Issues/<guid>/<guid>/issue.json       # a sub-issue (folder nesting, any depth)
   Sprints/<guid>/sprint.json
   Releases/<guid>/release.json
-```
-
-An `issue.json` looks like:
-
-```json
-{
-  "Id": "…", "Type": "Task", "Title": "…", "Description": "…",
-  "SprintId": "…", "Status": "Open", "Priority": "Medium",
-  "Reporter": "", "Assignee": "", "CreatedAt": "…", "UpdatedAt": null,
-  "Tags": [], "Comments": [], "ReleaseNoteType": "None", "ReleaseNote": ""
-}
 ```
 
 Files are written PascalCase, 2-space indented, enums as strings — matching the
@@ -119,13 +153,10 @@ require("lazyissues").setup({
   width = 0.92,         -- float width as a fraction of the editor
   height = 0.88,        -- float height
   auto_refresh = true,  -- reload from disk on FocusGained
-  assignees = { "Unassigned", "David", "Lewis", "Claude" },
-  comment_authors = { "David", "Lewis", "Claude" },
+  assignees = { "Unassigned", "Alice", "Bob" },
+  comment_authors = { "Alice", "Bob" },
 })
 ```
-
-> **Roadmap:** a field *schema* config to make the issue fields, enums, colours
-> and lifecycle fully customisable for trackers other than the default format.
 
 ## License
 

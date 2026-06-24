@@ -12,8 +12,8 @@ M.release_status = { "InDevelopment", "InProgress", "ReadyToPublish", "Published
 M.release_note_type = { "None", "Public" }
 
 -- Fixed pick-lists from the frontend.
-M.assignees = { "Unassigned", "David", "Lewis", "Claude" }
-M.comment_authors = { "David", "Lewis", "Claude" }
+M.assignees = { "Unassigned" }
+M.comment_authors = {}
 
 -- Defaults applied when a field is absent (older files) or on creation,
 -- matching the backend model defaults.
