@@ -1914,14 +1914,21 @@ local function template_picker(selected, existing_template, on_done)
     checked[f.name] = selected and selected[f.name] or false
   end
 
+  local top = NuiLine()
+  top:append(" lazyissues ", "LazyIssuesBorder")
+  top:append("template", "FloatTitle")
+  top:append(" ", "LazyIssuesBorder")
+  local bottom = NuiLine()
+  bottom:append(" space toggle · enter confirm · q cancel ", "LazyIssuesBorder")
+
   local pop = Popup({
     enter = true,
     border = {
       style = "rounded",
       text = {
-        top = " Select issue fields ",
+        top = top,
         top_align = "center",
-        bottom = " space toggle · enter confirm · q cancel ",
+        bottom = bottom,
         bottom_align = "center",
       },
     },
