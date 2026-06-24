@@ -417,6 +417,7 @@ local function render_detail(V, node)
     return #lines - 1
   end
 
+  add("")
   add(string.format("  #%s   %s", short(it.Id), val(it.Type)), "LazyIssuesHeader")
   for _, tl in ipairs(wrap(it.Title or "", width)) do
     add("  " .. tl, "LazyIssuesHeader")
@@ -424,6 +425,7 @@ local function render_detail(V, node)
   if node._changed then
     add("  ✎ edited on this branch", "LazyIssuesChanged")
   end
+  add("")
   add("  " .. string.rep("─", width))
 
   -- Progress bar for issues with sub-issues (% of descendants complete).
