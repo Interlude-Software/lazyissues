@@ -624,10 +624,15 @@ local function render_issues(V)
   for i, r in ipairs(V.rows) do
     local n = r.node
     local it = n.issue or {}
-    -- Left gutter: branch-edit marker (bright = this issue, dim = a descendant).
-    local gut = n._changed and "▌" or (n._changed_desc and "▏" or " ")
-    local gut_hl = n._changed and "LazyIssuesChanged"
-      or (n._changed_desc and "LazyIssuesChangedDim" or nil)
+    -- Left gutter: multi-select mark takes precedence, else branch-edit marker
+    -- (bright = this issue, dim = a descendant).
+    local gut, gut_hl
+    if V.marked and V.marked[n.id] then
+      gut, gut_hl = "◆", "LazyIssuesMarked"
+    else
+      gut = n._changed and "▌" or (n._changed_desc and "▏" or " ")
+      gut_hl = n._changed and "LazyIssuesChanged" or (n._changed_desc and "LazyIssuesChangedDim" or nil)
+    end
 
     -- Build tree connector prefix.
     local tree = ""
@@ -1121,6 +1126,29 @@ local function jump_changed(V, dir)
   vim.notify("lazyissues: no branch-edited issues", vim.log.levels.INFO)
 end
 
+-- Multi-select: toggle the mark on the selected issue (cursor advances by one).
+local function toggle_mark(V)
+  local node = selected_node(V)
+  if not node or not node.issue then
+    return
+  end
+  V.marked[node.id] = (not V.marked[node.id]) or nil
+  local row = vim.api.nvim_win_get_cursor(V.issues.winid)[1]
+  render_issues(V)
+  pcall(vim.api.nvim_win_set_cursor, V.issues.winid, { math.min(row + 1, #V.rows), 0 })
+  render_detail(V, selected_node(V))
+end
+
+local function marked_nodes(V)
+  local out = {}
+  for _, n in ipairs(flatten(V.model)) do
+    if n.issue and V.marked[n.id] then
+      out[#out + 1] = n
+    end
+  end
+  return out
+end
+
 -- Expand or collapse every issue that has sub-issues.
 local function set_all_expanded(V, expand)
   if not expand then
@@ -1186,6 +1214,70 @@ local function apply_field(V, node, key, value)
   end
   node.issue = it
   refresh(V, true)
+end
+
+-- Apply one action to every marked issue (set a field, set sprint, or delete).
+-- Defined after apply_field/reload_select since it depends on both.
+local function bulk_action(V)
+  local nodes = marked_nodes(V)
+  if #nodes == 0 then
+    vim.notify("lazyissues: no issues marked (x to mark)", vim.log.levels.INFO)
+    return
+  end
+  local function apply_all(key, val)
+    for _, n in ipairs(nodes) do
+      apply_field(V, n, key, val)
+    end
+    V.marked = {}
+    refresh(V, true)
+    focus(V, "issues")
+  end
+  prompt_select(
+    "Bulk on " .. #nodes .. " issue(s):",
+    { "Set Status", "Set Priority", "Set Sprint", "Delete", "Clear marks" },
+    function(choice)
+      if not choice then
+        return
+      end
+      if choice == "Clear marks" then
+        V.marked = {}
+        refresh(V, true)
+      elseif choice == "Set Status" then
+        prompt_select("Status:", config.issue_status, function(v)
+          if v then
+            apply_all("Status", v)
+          end
+        end)
+      elseif choice == "Set Priority" then
+        prompt_select("Priority:", config.issue_priority, function(v)
+          if v then
+            apply_all("Priority", v)
+          end
+        end)
+      elseif choice == "Set Sprint" then
+        local items, map = { "Backlog" }, { Backlog = config.empty_guid }
+        for _, sp in ipairs(V.model.sprints) do
+          items[#items + 1] = sp.Name
+          map[sp.Name] = sp.Id
+        end
+        prompt_select("Sprint:", items, function(v)
+          if v then
+            apply_all("SprintId", map[v])
+          end
+        end)
+      elseif choice == "Delete" then
+        prompt_select("Delete " .. #nodes .. " issue(s)?", { "No", "Yes" }, function(c)
+          if c == "Yes" then
+            for _, n in ipairs(nodes) do
+              pcall(actions.delete_issue, n.path)
+            end
+            V.marked = {}
+            reload_select(V, nil)
+          end
+        end)
+      end
+    end
+  )
 end
 
 -- The optional `on_done` callback (used by the edit menu) fires after the edit
@@ -2700,6 +2792,17 @@ local function map_keys(V, bufnr, kind)
     map("P", function()
       change_parent_action(V)
     end)
+    -- Multi-select + bulk
+    map("x", function()
+      toggle_mark(V)
+    end)
+    map("X", function()
+      V.marked = {}
+      refresh(V, true)
+    end)
+    map("b", function()
+      bulk_action(V)
+    end)
   end
 end
 
@@ -3216,6 +3319,7 @@ function M.open()
     search = "",
     expanded = {},
     sprint_expanded = {},
+    marked = {},
     scopes = panel(1, "Scopes"),
     sprints = panel(2, "Sprints"),
     releases = panel(3, "Releases"),

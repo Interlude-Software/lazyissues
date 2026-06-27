@@ -59,6 +59,8 @@ function M.setup()
     -- Vertical scrollbar: bright thumb over a dim track.
     LazyIssuesScrollThumb = { fg = "#b8c0e0" },
     LazyIssuesScrollTrack = { fg = "#3a3a3a" },
+    -- Multi-select mark in the issues gutter.
+    LazyIssuesMarked = { fg = "#7aa2f7", bold = true },
   }
   for name, spec in pairs(hl) do
     spec.default = true
