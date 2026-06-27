@@ -34,6 +34,233 @@ local function short(id)
   return tostring(id):sub(1, 8)
 end
 
+-- Centered input popup. Single-line by default (Enter confirms); pass
+-- opts.multiline for a taller, wrapping editor (Ctrl-s saves, Esc cancels).
+-- opts.width / opts.height override the size. Mirrors vim.ui.input's contract:
+-- on_accept gets the text on confirm, nil on cancel.
+local function prompt_input(label, default, on_accept, opts)
+  opts = opts or {}
+  local multiline = opts.multiline
+  local pop = Popup({
+    enter = true,
+    border = {
+      style = "rounded",
+      highlight = "LazyIssuesBorder",
+      text = {
+        top = " " .. vim.trim(label) .. " ",
+        top_align = "center",
+        bottom = multiline and " Ctrl-s save · Esc cancel " or " Enter confirm · Esc cancel ",
+        bottom_align = "center",
+      },
+    },
+    position = "50%",
+    size = {
+      width = opts.width or (multiline and "60%" or "70%"),
+      height = opts.height or (multiline and "40%" or 1),
+    },
+    zindex = 60,
+    buf_options = { modifiable = true, filetype = multiline and "markdown" or "" },
+    win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder", wrap = multiline or false },
+  })
+  pop:mount()
+  vim.api.nvim_buf_set_lines(pop.bufnr, 0, -1, false, vim.split(tostring(default or ""), "\n", { plain = true }))
+  local finished = false
+  local function finish(accept)
+    if finished then
+      return
+    end
+    finished = true
+    local txt
+    if accept then
+      local lines = vim.api.nvim_buf_get_lines(pop.bufnr, 0, -1, false)
+      txt = multiline and table.concat(lines, "\n") or (lines[1] or "")
+    end
+    pcall(function()
+      pop:unmount()
+    end)
+    if on_accept then
+      on_accept(txt)
+    end
+  end
+  if multiline then
+    -- Enter inserts a newline; Ctrl-s saves; Esc/q (normal mode) cancels.
+    vim.keymap.set({ "n", "i" }, "<C-s>", function()
+      finish(true)
+    end, { buffer = pop.bufnr })
+    for _, k in ipairs({ "<Esc>", "q" }) do
+      vim.keymap.set("n", k, function()
+        finish(false)
+      end, { buffer = pop.bufnr })
+    end
+  else
+    vim.keymap.set({ "n", "i" }, "<CR>", function()
+      finish(true)
+    end, { buffer = pop.bufnr })
+    vim.keymap.set({ "n", "i" }, "<Esc>", function()
+      finish(false)
+    end, { buffer = pop.bufnr })
+  end
+  -- Cursor at the end of the prefilled content.
+  local last = vim.api.nvim_buf_line_count(pop.bufnr)
+  local last_line = vim.api.nvim_buf_get_lines(pop.bufnr, last - 1, last, false)[1] or ""
+  pcall(vim.api.nvim_win_set_cursor, pop.winid, { last, #last_line })
+  vim.cmd("startinsert!")
+end
+
+-- Centered menu popup. `items` is a list of strings, or { text=, value= } tables.
+-- on_choice receives the chosen value on select, or nil on cancel. Mirrors
+-- vim.ui.select's contract so callers can swap it in directly.
+local function prompt_select(label, items, on_choice)
+  local Menu = require("nui.menu")
+  local menu_items, width = {}, 0
+  for _, entry in ipairs(items) do
+    local text = type(entry) == "table" and entry.text or tostring(entry)
+    local value = type(entry) == "table" and entry.value or entry
+    menu_items[#menu_items + 1] = Menu.item(text, { value = value })
+    width = math.max(width, vim.api.nvim_strwidth(text))
+  end
+  width = math.max(width + 4, vim.api.nvim_strwidth(vim.trim(label)) + 4, 20)
+  local handled = false
+  local menu = Menu({
+    position = "50%",
+    size = { width = width, height = math.max(1, math.min(#menu_items, 12)) },
+    border = {
+      style = "rounded",
+      highlight = "LazyIssuesBorder",
+      text = {
+        top = " " .. vim.trim(label) .. " ",
+        top_align = "center",
+        bottom = " ↵ select · Esc cancel ",
+        bottom_align = "center",
+      },
+    },
+    zindex = 60,
+    win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder,CursorLine:PmenuSel" },
+  }, {
+    lines = menu_items,
+    keymap = {
+      focus_next = { "j", "<Down>" },
+      focus_prev = { "k", "<Up>" },
+      close = { "q", "<Esc>" },
+      submit = { "<CR>", "l" },
+    },
+    on_submit = function(item)
+      handled = true
+      if on_choice then
+        on_choice(item.value)
+      end
+    end,
+    on_close = function()
+      if not handled and on_choice then
+        on_choice(nil)
+      end
+    end,
+  })
+  menu:mount()
+end
+
+-- Simple centered read-only popup for reports/previews. `hls` is a list of
+-- { line_index, highlight_group } applied to whole lines. q/Esc closes.
+local function info_popup(title, lines, hls, opts)
+  opts = opts or {}
+  local pop = Popup({
+    enter = true,
+    border = {
+      style = "rounded",
+      highlight = "LazyIssuesBorder",
+      text = { top = " " .. title .. " ", top_align = "center", bottom = " q close ", bottom_align = "center" },
+    },
+    position = "50%",
+    size = { width = opts.width or "60%", height = opts.height or "60%" },
+    zindex = 60,
+    buf_options = { modifiable = false, filetype = opts.filetype or "lazyissues" },
+    win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder", wrap = true },
+  })
+  pop:mount()
+  vim.bo[pop.bufnr].modifiable = true
+  vim.api.nvim_buf_set_lines(pop.bufnr, 0, -1, false, lines)
+  vim.bo[pop.bufnr].modifiable = false
+  for _, h in ipairs(hls or {}) do
+    vim.api.nvim_buf_add_highlight(pop.bufnr, ns, h[2], h[1], 0, -1)
+  end
+  for _, k in ipairs({ "q", "<Esc>" }) do
+    vim.keymap.set("n", k, function()
+      pcall(function()
+        pop:unmount()
+      end)
+    end, { buffer = pop.bufnr })
+  end
+end
+
+-- Vertical scrollbar overlay for a panel. Drawn as a 1-column float pinned over
+-- the panel's right border, with a proportional thumb; shown only when the
+-- buffer overflows the window. Reuses one float/buffer per panel (p._sb).
+local sb_ns = vim.api.nvim_create_namespace("lazyissues_scrollbar")
+
+local function close_scrollbar(p)
+  if p and p._sb then
+    if p._sb.win and vim.api.nvim_win_is_valid(p._sb.win) then
+      pcall(vim.api.nvim_win_close, p._sb.win, true)
+    end
+    p._sb = nil
+  end
+end
+
+local function update_scrollbar(p)
+  if not (p and p.winid and vim.api.nvim_win_is_valid(p.winid)) then
+    return close_scrollbar(p)
+  end
+  local total = vim.api.nvim_buf_line_count(p.bufnr)
+  local height = vim.api.nvim_win_get_height(p.winid)
+  if total <= height or height < 2 then
+    return close_scrollbar(p) -- nothing to scroll
+  end
+  local topline = (vim.fn.getwininfo(p.winid)[1] or {}).topline or 1
+  local thumb = math.max(1, math.floor(height * height / total + 0.5))
+  local maxpos = height - thumb
+  local pos = math.max(0, math.min(maxpos, math.floor((topline - 1) / (total - height) * maxpos + 0.5)))
+
+  if not (p._sb and vim.api.nvim_buf_is_valid(p._sb.buf)) then
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.bo[buf].bufhidden = "wipe"
+    p._sb = { buf = buf }
+  end
+  local lines = {}
+  for i = 0, height - 1 do
+    lines[i + 1] = (i >= pos and i < pos + thumb) and "█" or "│"
+  end
+  vim.api.nvim_buf_set_lines(p._sb.buf, 0, -1, false, lines)
+  vim.api.nvim_buf_clear_namespace(p._sb.buf, sb_ns, 0, -1)
+  for i = 0, height - 1 do
+    local g = (i >= pos and i < pos + thumb) and "LazyIssuesScrollThumb" or "LazyIssuesScrollTrack"
+    vim.api.nvim_buf_add_highlight(p._sb.buf, sb_ns, g, i, 0, -1)
+  end
+
+  local wpos = vim.api.nvim_win_get_position(p.winid)
+  local cfg = {
+    relative = "editor",
+    row = wpos[1],
+    col = wpos[2] + vim.api.nvim_win_get_width(p.winid), -- over the right border
+    width = 1,
+    height = height,
+    focusable = false,
+    style = "minimal",
+    zindex = 55,
+    noautocmd = true,
+  }
+  if p._sb.win and vim.api.nvim_win_is_valid(p._sb.win) then
+    vim.api.nvim_win_set_config(p._sb.win, cfg)
+  else
+    p._sb.win = vim.api.nvim_open_win(p._sb.buf, false, cfg)
+  end
+end
+
+local function update_scrollbars(V)
+  for _, key in ipairs({ "scopes", "sprints", "releases", "issues", "detail" }) do
+    update_scrollbar(V[key])
+  end
+end
+
 -- Word-wrap text (honoring embedded newlines) to `width` columns.
 local function wrap(text, width)
   width = math.max(10, width or 40)
@@ -147,10 +374,24 @@ local function release_sprint_ids(model, release_id)
   return set
 end
 
+-- Free-text match across the most useful fields, not just the title.
+local function issue_matches(it, q)
+  local hay = { it.Title or "", tostring(it.Id or "") }
+  for _, k in ipairs({ "Assignee", "Reporter", "Description", "ReleaseNote" }) do
+    if type(it[k]) == "string" then
+      hay[#hay + 1] = it[k]
+    end
+  end
+  if type(it.Tags) == "table" then
+    hay[#hay + 1] = table.concat(it.Tags, " ")
+  end
+  return table.concat(hay, "\n"):lower():find(q:lower(), 1, true) ~= nil
+end
+
 local function compute_rows(V)
   local model, scope, search = V.model, V.scope, V.search
-  -- Tree view for "all" with no search; flat filtered list otherwise.
-  if scope.kind == "all" and (not search or search == "") then
+  -- Tree view for "all" with no search/filter/sort; flat list otherwise.
+  if scope.kind == "all" and (not search or search == "") and not V.field_filter and not V.sort then
     return tree_rows(model, V.expanded)
   end
 
@@ -175,11 +416,49 @@ local function compute_rows(V)
         ok = V._rel_sprints[it.SprintId] == true
       end
       if ok and search and search ~= "" then
-        ok = (it.Title or ""):lower():find(search:lower(), 1, true) ~= nil
+        ok = issue_matches(it, search)
+      end
+      if ok and V.field_filter then
+        local ff = V.field_filter
+        if ff.field == "Tags" then
+          ok = type(it.Tags) == "table" and vim.tbl_contains(it.Tags, ff.value)
+        else
+          ok = tostring(it[ff.field] or "") == ff.value
+        end
       end
       if ok then
         matched[#matched + 1] = n
       end
+    end
+  end
+  if V.sort then
+    local function rank(list, val)
+      for i, x in ipairs(list) do
+        if x == val then
+          return i
+        end
+      end
+      return math.huge
+    end
+    local cmp = {
+      Priority = function(a, b)
+        return rank(config.issue_priority, a.issue.Priority) > rank(config.issue_priority, b.issue.Priority)
+      end,
+      Status = function(a, b)
+        return rank(config.issue_status, a.issue.Status) < rank(config.issue_status, b.issue.Status)
+      end,
+      ["% complete"] = function(a, b)
+        return issue_percent(a) > issue_percent(b)
+      end,
+      Created = function(a, b)
+        return tostring(a.issue.CreatedAt or "") > tostring(b.issue.CreatedAt or "")
+      end,
+      Title = function(a, b)
+        return (a.issue.Title or ""):lower() < (b.issue.Title or ""):lower()
+      end,
+    }
+    if cmp[V.sort] then
+      table.sort(matched, cmp[V.sort])
     end
   end
   return flat_rows(matched)
@@ -345,10 +624,15 @@ local function render_issues(V)
   for i, r in ipairs(V.rows) do
     local n = r.node
     local it = n.issue or {}
-    -- Left gutter: branch-edit marker (bright = this issue, dim = a descendant).
-    local gut = n._changed and "▌" or (n._changed_desc and "▏" or " ")
-    local gut_hl = n._changed and "LazyIssuesChanged"
-      or (n._changed_desc and "LazyIssuesChangedDim" or nil)
+    -- Left gutter: multi-select mark takes precedence, else branch-edit marker
+    -- (bright = this issue, dim = a descendant).
+    local gut, gut_hl
+    if V.marked and V.marked[n.id] then
+      gut, gut_hl = "◆", "LazyIssuesMarked"
+    else
+      gut = n._changed and "▌" or (n._changed_desc and "▏" or " ")
+      gut_hl = n._changed and "LazyIssuesChanged" or (n._changed_desc and "LazyIssuesChangedDim" or nil)
+    end
 
     -- Build tree connector prefix.
     local tree = ""
@@ -503,18 +787,57 @@ local function render_detail(V, node)
       add("    " .. dl)
     end
   end
-  add("  " .. string.rep("─", width))
-  local footer_parts = {}
+  -- Comments list (table-style section), if the schema has comments.
   if has_comments then
-    footer_parts[#footer_parts + 1] = string.format("Comments (%d)", (it.Comments and #it.Comments) or 0)
+    local comments = (it.Comments and it.Comments ~= vim.NIL) and it.Comments or {}
+    add("  " .. string.rep("─", width))
+    add(string.format("  Comments (%d)", #comments), "LazyIssuesLabel")
+    if #comments == 0 then
+      add("    —")
+    else
+      for _, c in ipairs(comments) do
+        local author = (c.Author and c.Author ~= vim.NIL and c.Author ~= "") and tostring(c.Author) or "—"
+        local date = tostring(c.CreatedAt or ""):sub(1, 10)
+        local li = add(string.format("  %s · %s", author, date))
+        hls[#hls + 1] = { "LazyIssuesLabel", li, 2, 2 + #author }
+        for _, bl in ipairs(wrap(tostring(c.Body or ""), width - 4)) do
+          add("      " .. bl)
+        end
+      end
+    end
   end
-  footer_parts[#footer_parts + 1] = string.format("Children (%d)", #node.children)
-  add("  " .. table.concat(footer_parts, "   "))
+
+  -- Children list (table-style section), with the tree's status glyph/colour.
+  add("  " .. string.rep("─", width))
+  add(string.format("  Children (%d)", #node.children), "LazyIssuesLabel")
+  if #node.children == 0 then
+    add("    —")
+  else
+    for _, child in ipairs(node.children) do
+      local ci = child.issue or {}
+      local glyph = icons.glyph(ci.Status)
+      local suffix = ""
+      if #child.children > 0 then
+        suffix = string.format("  %d%%", math.floor(issue_percent(child) * 100 + 0.5))
+      end
+      local title = tostring(ci.Title or "(untitled)")
+      local avail = width - 4 - #suffix
+      if avail > 1 and #title > avail then
+        title = title:sub(1, avail - 1) .. "…"
+      end
+      local li = add(string.format("  %s %s%s", glyph, title, suffix))
+      local ghl = icons.status_hl[ci.Status]
+      if ghl then
+        hls[#hls + 1] = { ghl, li, 2, 2 + #glyph }
+      end
+    end
+  end
 
   set_lines(bufnr, lines)
   for _, h in ipairs(hls) do
     hl(bufnr, h[1], h[2], h[3], h[4])
   end
+  update_scrollbar(V.detail)
 end
 
 local function selected_node(V)
@@ -539,6 +862,7 @@ local function refresh(V, keep_cursor)
     pcall(vim.api.nvim_win_set_cursor, V.issues.winid, { 1, 0 })
   end
   render_detail(V, selected_node(V))
+  update_scrollbars(V)
 end
 
 -- ── interaction ─────────────────────────────────────────────────────────────
@@ -565,6 +889,9 @@ local function cycle_focus(V, dir)
 end
 
 local function close(V)
+  for _, key in ipairs({ "scopes", "sprints", "releases", "issues", "detail" }) do
+    close_scrollbar(V[key])
+  end
   if V.layout then
     pcall(function()
       V.layout:unmount()
@@ -637,15 +964,203 @@ local function toggle_expand(V)
   end
 end
 
+-- Live filter bar pinned across the bottom of the issues panel. Typing filters
+-- the list in real time (compute_rows already matches on V.search); <CR> keeps
+-- the filter and returns to the list, <Esc> restores the previous filter.
 local function do_search(V)
-  vim.ui.input({ prompt = "Search issues: ", default = V.search or "" }, function(input)
-    if input == nil then
+  local win = V.issues.winid
+  if not (win and vim.api.nvim_win_is_valid(win)) then
+    return
+  end
+  local pos = vim.api.nvim_win_get_position(win)
+  local w = vim.api.nvim_win_get_width(win)
+  local h = vim.api.nvim_win_get_height(win)
+  local prev_search = V.search or ""
+
+  local bar = Popup({
+    enter = true,
+    relative = "editor",
+    -- Dock flush across the bottom of the issues panel: content on the last
+    -- content row (Nui draws the border at ±1), full panel width so the bar's
+    -- side borders line up over the panel's own borders.
+    position = { row = pos[1] + math.max(0, h - 1), col = pos[2] },
+    size = { width = w, height = 1 },
+    border = {
+      style = "rounded",
+      text = { top = " / live filter ", top_align = "left" },
+      highlight = "LazyIssuesBorder",
+    },
+    zindex = 60,
+    buf_options = { modifiable = true, filetype = "" },
+    win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder" },
+  })
+  bar:mount()
+  if prev_search ~= "" then
+    vim.api.nvim_buf_set_lines(bar.bufnr, 0, -1, false, { prev_search })
+  end
+
+  local closed = false
+  local function dismiss(restore)
+    if closed then
       return
     end
-    V.search = input
+    closed = true
+    if restore then
+      V.search = prev_search
+      refresh(V)
+    end
+    vim.cmd("stopinsert")
+    pcall(function()
+      bar:unmount()
+    end)
+    focus(V, "issues")
+  end
+
+  vim.api.nvim_create_autocmd({ "TextChangedI", "TextChanged" }, {
+    buffer = bar.bufnr,
+    callback = function()
+      V.search = vim.api.nvim_buf_get_lines(bar.bufnr, 0, 1, false)[1] or ""
+      refresh(V)
+    end,
+  })
+
+  local function map(lhs, fn)
+    vim.keymap.set({ "n", "i" }, lhs, fn, { buffer = bar.bufnr, nowait = true, silent = true })
+  end
+  map("<CR>", function()
+    dismiss(false)
+  end)
+  map("<Esc>", function()
+    dismiss(true)
+  end)
+
+  pcall(vim.api.nvim_win_set_cursor, bar.winid, { 1, #prev_search })
+  vim.cmd("startinsert!")
+end
+
+-- Filter the issue list by a field value (Status/Priority/Assignee/Tag). The
+-- filter composes with the scope and the live search; pick "Clear filter" to drop it.
+local function field_filter_action(V)
+  local fields = { "Status", "Priority", "Assignee", "Tag" }
+  if V.field_filter then
+    fields[#fields + 1] = "Clear filter"
+  end
+  prompt_select("Filter by:", fields, function(field)
+    if not field then
+      return
+    end
+    if field == "Clear filter" then
+      V.field_filter = nil
+      refresh(V)
+      return
+    end
+    local values
+    if field == "Status" then
+      values = config.issue_status
+    elseif field == "Priority" then
+      values = config.issue_priority
+    elseif field == "Assignee" then
+      values = config.assignees
+    else -- Tag: distinct tags across all issues
+      local seen = {}
+      values = {}
+      for _, n in ipairs(flatten(V.model)) do
+        local it = n.issue
+        if it and type(it.Tags) == "table" then
+          for _, tg in ipairs(it.Tags) do
+            if not seen[tg] then
+              seen[tg] = true
+              values[#values + 1] = tg
+            end
+          end
+        end
+      end
+    end
+    if not values or #values == 0 then
+      vim.notify("lazyissues: no values to filter by", vim.log.levels.INFO)
+      return
+    end
+    prompt_select(field .. " =", values, function(val)
+      if not val then
+        return
+      end
+      V.field_filter = { field = field == "Tag" and "Tags" or field, value = val }
+      refresh(V)
+      focus(V, "issues")
+    end)
+  end)
+end
+
+-- Sort the issue list (switches to a flat view); "Default (tree)" restores the tree.
+local function sort_action(V)
+  prompt_select("Sort by:", { "Default (tree)", "Priority", "Status", "% complete", "Created", "Title" }, function(choice)
+    if not choice then
+      return
+    end
+    V.sort = (choice ~= "Default (tree)") and choice or nil
     refresh(V)
     focus(V, "issues")
   end)
+end
+
+-- Move the cursor to the next/prev issue edited on this branch (wraps around).
+local function jump_changed(V, dir)
+  if not (V.issues.winid and vim.api.nvim_win_is_valid(V.issues.winid)) then
+    return
+  end
+  local rows, n = V.rows, #V.rows
+  if n == 0 then
+    return
+  end
+  local cur = vim.api.nvim_win_get_cursor(V.issues.winid)[1]
+  for step = 1, n do
+    local i = ((cur - 1 + dir * step) % n) + 1
+    local r = rows[i]
+    if r and r.node and r.node._changed then
+      pcall(vim.api.nvim_win_set_cursor, V.issues.winid, { i, 0 })
+      render_detail(V, selected_node(V))
+      update_scrollbar(V.issues)
+      return
+    end
+  end
+  vim.notify("lazyissues: no branch-edited issues", vim.log.levels.INFO)
+end
+
+-- Multi-select: toggle the mark on the selected issue (cursor advances by one).
+local function toggle_mark(V)
+  local node = selected_node(V)
+  if not node or not node.issue then
+    return
+  end
+  V.marked[node.id] = (not V.marked[node.id]) or nil
+  local row = vim.api.nvim_win_get_cursor(V.issues.winid)[1]
+  render_issues(V)
+  pcall(vim.api.nvim_win_set_cursor, V.issues.winid, { math.min(row + 1, #V.rows), 0 })
+  render_detail(V, selected_node(V))
+end
+
+local function marked_nodes(V)
+  local out = {}
+  for _, n in ipairs(flatten(V.model)) do
+    if n.issue and V.marked[n.id] then
+      out[#out + 1] = n
+    end
+  end
+  return out
+end
+
+-- Expand or collapse every issue that has sub-issues.
+local function set_all_expanded(V, expand)
+  if not expand then
+    V.expanded = {}
+  else
+    for _, n in ipairs(flatten(V.model)) do
+      if #n.children > 0 then
+        V.expanded[n.id] = true
+      end
+    end
+  end
+  refresh(V, true)
 end
 
 local function reload(V)
@@ -701,6 +1216,70 @@ local function apply_field(V, node, key, value)
   refresh(V, true)
 end
 
+-- Apply one action to every marked issue (set a field, set sprint, or delete).
+-- Defined after apply_field/reload_select since it depends on both.
+local function bulk_action(V)
+  local nodes = marked_nodes(V)
+  if #nodes == 0 then
+    vim.notify("lazyissues: no issues marked (x to mark)", vim.log.levels.INFO)
+    return
+  end
+  local function apply_all(key, val)
+    for _, n in ipairs(nodes) do
+      apply_field(V, n, key, val)
+    end
+    V.marked = {}
+    refresh(V, true)
+    focus(V, "issues")
+  end
+  prompt_select(
+    "Bulk on " .. #nodes .. " issue(s):",
+    { "Set Status", "Set Priority", "Set Sprint", "Delete", "Clear marks" },
+    function(choice)
+      if not choice then
+        return
+      end
+      if choice == "Clear marks" then
+        V.marked = {}
+        refresh(V, true)
+      elseif choice == "Set Status" then
+        prompt_select("Status:", config.issue_status, function(v)
+          if v then
+            apply_all("Status", v)
+          end
+        end)
+      elseif choice == "Set Priority" then
+        prompt_select("Priority:", config.issue_priority, function(v)
+          if v then
+            apply_all("Priority", v)
+          end
+        end)
+      elseif choice == "Set Sprint" then
+        local items, map = { "Backlog" }, { Backlog = config.empty_guid }
+        for _, sp in ipairs(V.model.sprints) do
+          items[#items + 1] = sp.Name
+          map[sp.Name] = sp.Id
+        end
+        prompt_select("Sprint:", items, function(v)
+          if v then
+            apply_all("SprintId", map[v])
+          end
+        end)
+      elseif choice == "Delete" then
+        prompt_select("Delete " .. #nodes .. " issue(s)?", { "No", "Yes" }, function(c)
+          if c == "Yes" then
+            for _, n in ipairs(nodes) do
+              pcall(actions.delete_issue, n.path)
+            end
+            V.marked = {}
+            reload_select(V, nil)
+          end
+        end)
+      end
+    end
+  )
+end
+
 -- The optional `on_done` callback (used by the edit menu) fires after the edit
 -- completes OR is cancelled, so the menu can reopen as a hub.
 local function done(cb)
@@ -722,7 +1301,7 @@ local function picker(V, key, items, prompt, transform, on_done)
     locked_notify()
     return done(on_done)
   end
-  vim.ui.select(items, { prompt = prompt }, function(choice)
+  prompt_select(prompt, items, function(choice)
     if choice then
       apply_field(V, node, key, transform and transform(choice) or choice)
     end
@@ -744,7 +1323,7 @@ local function pick_sprint(V, on_done)
     items[#items + 1] = sp.Name
     map[sp.Name] = sp.Id
   end
-  vim.ui.select(items, { prompt = "Sprint:" }, function(choice)
+  prompt_select("Sprint:", items, function(choice)
     if choice then
       apply_field(V, node, "SprintId", map[choice])
     end
@@ -765,11 +1344,11 @@ local function edit_text(V, key, prompt, on_done)
   if cur == vim.NIL then
     cur = ""
   end
-  vim.ui.input({ prompt = prompt, default = tostring(cur or "") }, function(input)
+  prompt_input(prompt, tostring(cur or ""), function(input)
     if input ~= nil then
       apply_field(V, node, key, input)
     end
-    done(on_done)
+    done(on_done) -- save or cancel both return to the edit menu hub
   end)
 end
 
@@ -783,7 +1362,7 @@ local function edit_tags(V, on_done)
     return done(on_done)
   end
   local cur = (node.issue.Tags and table.concat(node.issue.Tags, ", ")) or ""
-  vim.ui.input({ prompt = "Tags (comma-separated): ", default = cur }, function(input)
+  prompt_input("Tags (comma-separated)", cur, function(input)
     if input ~= nil then
       local tags = {}
       for t in input:gmatch("[^,]+") do
@@ -794,46 +1373,21 @@ local function edit_tags(V, on_done)
       end
       apply_field(V, node, "Tags", tags)
     end
-    done(on_done)
+    done(on_done) -- save or cancel both return to the edit menu hub
   end)
 end
 
--- Generic multiline editor popup. Calls on_accept(text) on Ctrl-s, on_close always.
+-- Multi-line editor: thin wrapper over prompt_input. on_accept fires only on
+-- save (Ctrl-s); on_close fires on both save and cancel.
 local function multiline_input(label, initial, on_accept, on_close)
-  local Popup = require("nui.popup")
-  local pop = Popup({
-    enter = true,
-    border = {
-      style = "rounded",
-      text = { top = " " .. label .. "  (Ctrl-s save · Esc cancel) ", top_align = "center" },
-    },
-    position = "50%",
-    size = { width = "60%", height = "40%" },
-    buf_options = { modifiable = true, filetype = "markdown" },
-    win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder", wrap = true },
-  })
-  pop:mount()
-  vim.api.nvim_buf_set_lines(pop.bufnr, 0, -1, false, vim.split(tostring(initial or ""), "\n", { plain = true }))
-  local function finish(accept)
-    local txt = accept and table.concat(vim.api.nvim_buf_get_lines(pop.bufnr, 0, -1, false), "\n") or nil
-    pcall(function()
-      pop:unmount()
-    end)
-    if accept and on_accept then
+  prompt_input(label, initial, function(txt)
+    if txt ~= nil and on_accept then
       on_accept(txt)
     end
     if on_close then
       on_close()
     end
-  end
-  vim.keymap.set({ "n", "i" }, "<C-s>", function()
-    finish(true)
-  end, { buffer = pop.bufnr })
-  for _, k in ipairs({ "<Esc>", "q" }) do
-    vim.keymap.set("n", k, function()
-      finish(false)
-    end, { buffer = pop.bufnr })
-  end
+  end, { multiline = true })
 end
 
 local function edit_multiline(V, key, label, on_done)
@@ -849,11 +1403,12 @@ local function edit_multiline(V, key, label, on_done)
   if cur == vim.NIL then
     cur = ""
   end
-  multiline_input(label, cur, function(txt)
-    apply_field(V, node, key, txt)
-  end, function()
-    done(on_done)
-  end)
+  prompt_input(label, cur, function(txt)
+    if txt ~= nil then
+      apply_field(V, node, key, txt)
+    end
+    done(on_done) -- save or cancel both return to the edit menu hub
+  end, { multiline = true })
 end
 
 -- Comments viewer/manager popup for the selected issue.
@@ -865,21 +1420,22 @@ local function comments_view(V, on_close)
   local it = node.issue or {}
 
   local top = NuiLine()
-  top:append(" lazyissues ", "FloatBorder")
+  top:append(" lazyissues ", "LazyIssuesBorder")
   top:append("comments", "FloatTitle")
-  top:append(" ", "FloatBorder")
+  top:append(" ", "LazyIssuesBorder")
   local bottom = NuiLine()
-  bottom:append(" a add · d delete · q close ", "FloatBorder")
+  bottom:append(" a add · d delete · q close ", "LazyIssuesBorder")
 
-  local Popup = require("nui.popup")
   local pop = Popup({
     enter = true,
     border = {
       style = "rounded",
+      highlight = "LazyIssuesBorder",
       text = { top = top, top_align = "center", bottom = bottom, bottom_align = "center" },
     },
     position = "50%",
     size = { width = "60%", height = "60%" },
+    zindex = 60,
     buf_options = { modifiable = false, filetype = "lazyissues-comments" },
     win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder", cursorline = true, wrap = true },
   })
@@ -921,12 +1477,8 @@ local function comments_view(V, on_close)
   end
 
   local function add_comment()
-    vim.ui.select(config.comment_authors, { prompt = "Author:" }, function(author)
-      if not author then
-        return
-      end
-      -- Body entered in the bottom-bar prompt (no popup).
-      vim.ui.input({ prompt = "Comment (" .. author .. "): " }, function(body)
+    local function ask_body(author)
+      prompt_input("Comment (" .. author .. ")", "", function(body)
         if body == nil or vim.trim(body) == "" then
           return
         end
@@ -936,8 +1488,25 @@ local function comments_view(V, on_close)
           return
         end
         redraw()
+      end, { multiline = true })
+    end
+    local authors = config.comment_authors
+    if authors and #authors > 0 then
+      prompt_select("Author:", authors, function(author)
+        if author then
+          ask_body(author)
+        end
       end)
-    end)
+    else
+      -- No configured authors: ask for one, defaulting to the git/user name.
+      local default = gitmod.user_name(V.root) or vim.env.USER or ""
+      prompt_input("Comment author", default, function(author)
+        author = author and vim.trim(author) or ""
+        if author ~= "" then
+          ask_body(author)
+        end
+      end)
+    end
   end
   local function del_comment()
     local row = vim.api.nvim_win_get_cursor(pop.winid)[1]
@@ -972,8 +1541,8 @@ local function comments_view(V, on_close)
 end
 
 local function create_issue_action(V, parent_node)
-  local label = parent_node and "New child issue title: " or "New issue title: "
-  vim.ui.input({ prompt = label }, function(title)
+  local label = parent_node and "New child issue title" or "New issue title"
+  prompt_input(label, nil, function(title)
     if title == nil or vim.trim(title) == "" then
       return
     end
@@ -1008,7 +1577,7 @@ local function delete_action(V)
   count_desc(node)
   local title = (node.issue and node.issue.Title or node.id):sub(1, 40)
   local extra = n > 0 and (" and " .. n .. " sub-issue(s)") or ""
-  vim.ui.select({ "No", "Yes" }, { prompt = 'Delete "' .. title .. '"' .. extra .. "?" }, function(c)
+  prompt_select('Delete "' .. title .. '"' .. extra .. "?", { "No", "Yes" }, function(c)
     if c == "Yes" then
       local ok, err = actions.delete_issue(node.path)
       if not ok then
@@ -1020,52 +1589,26 @@ local function delete_action(V)
   end)
 end
 
-local function change_parent_action(V)
-  local node = selected_node(V)
-  if not node then
-    return
-  end
-  local prefix = node.path .. "/"
-
-  -- Build the full candidate list: (root) + all valid targets.
-  local all_items = { { label = "(root)", node = nil } }
-  local function collect(list)
-    for _, c in ipairs(list) do
-      local is_self = c.id == node.id
-      local is_desc = c.path:sub(1, #prefix) == prefix
-      if not is_self and not is_desc then
-        local indent = string.rep("  ", c.depth)
-        local title = (c.issue and c.issue.Title or c.id):sub(1, 50)
-        all_items[#all_items + 1] = { label = indent .. title, title_lower = title:lower(), node = c }
-      end
-      collect(c.children)
-    end
-  end
-  collect(V.model.issues)
-
-  local Popup = require("nui.popup")
-
+-- Reusable fuzzy picker: a results list with a live-filter input below it.
+-- `items` is a list of { label=, title_lower=(optional), always=(optional), ... };
+-- items flagged `always` stay visible regardless of the query (e.g. a "(root)"
+-- row). on_choose receives the selected item, or nil if cancelled.
+local function fuzzy_pick(title_word, items, on_choose)
   local top = NuiLine()
   top:append(" lazyissues ", "LazyIssuesBorder")
-  top:append("reparent", "FloatTitle")
+  top:append(title_word, "FloatTitle")
   top:append(" ", "LazyIssuesBorder")
 
-  local list_h = math.min(#all_items + 2, 24)
+  local list_h = math.min(#items + 2, 24)
   local pop_w = 64
+  local list_row = math.floor((vim.o.lines - list_h - 3) / 2)
+  local list_col = math.floor((vim.o.columns - pop_w) / 2)
 
-  -- Single popup for the results list.
   local list_pop = Popup({
     enter = false,
     relative = "editor",
-    position = {
-      row = math.floor((vim.o.lines - list_h - 3) / 2),
-      col = math.floor((vim.o.columns - pop_w) / 2),
-    },
-    border = {
-      style = "rounded",
-      text = { top = top, top_align = "center" },
-      highlight = "LazyIssuesBorder",
-    },
+    position = { row = list_row, col = list_col },
+    border = { style = "rounded", text = { top = top, top_align = "center" }, highlight = "LazyIssuesBorder" },
     size = { width = pop_w, height = list_h },
     zindex = 60,
     buf_options = { modifiable = false, filetype = "lazyissues" },
@@ -1073,16 +1616,10 @@ local function change_parent_action(V)
   })
   list_pop:mount()
 
-  -- Input prompt positioned directly below the list, sharing the border.
-  local list_row = math.floor((vim.o.lines - list_h - 3) / 2)
-  local list_col = math.floor((vim.o.columns - pop_w) / 2)
   local input_pop = Popup({
     enter = true,
     relative = "editor",
-    position = {
-      row = list_row + list_h + 2,
-      col = list_col,
-    },
+    position = { row = list_row + list_h + 2, col = list_col },
     border = {
       style = { "╭", "─", "╮", "│", "╯", "─", "╰", "│" },
       text = { top = " > ", top_align = "left" },
@@ -1096,7 +1633,10 @@ local function change_parent_action(V)
   input_pop:mount()
 
   local sel_row = 1
-  local filtered = vim.deepcopy(all_items)
+  local filtered = {}
+  for _, it in ipairs(items) do
+    filtered[#filtered + 1] = it
+  end
 
   local function redraw_list()
     local lines = {}
@@ -1110,16 +1650,13 @@ local function change_parent_action(V)
     vim.api.nvim_buf_set_lines(list_pop.bufnr, 0, -1, false, lines)
     vim.bo[list_pop.bufnr].modifiable = false
     vim.api.nvim_buf_clear_namespace(list_pop.bufnr, ns, 0, -1)
-    -- Highlight selected row.
     if #filtered > 0 then
       local r = math.min(sel_row, #filtered)
       vim.api.nvim_buf_add_highlight(list_pop.bufnr, ns, "PmenuSel", r - 1, 0, -1)
     end
-    -- Highlight (root) entry differently when not selected.
-    if #filtered > 0 and filtered[1].node == nil and sel_row ~= 1 then
+    if #filtered > 0 and filtered[1].always and sel_row ~= 1 then
       vim.api.nvim_buf_add_highlight(list_pop.bufnr, ns, "LazyIssuesLabel", 0, 0, -1)
     end
-    -- Scroll list to keep selection visible.
     if list_pop.winid and vim.api.nvim_win_is_valid(list_pop.winid) then
       local r = math.min(sel_row, #filtered)
       local win_h = vim.api.nvim_win_get_height(list_pop.winid)
@@ -1138,14 +1675,10 @@ local function change_parent_action(V)
 
   local function filter(text)
     text = (text or ""):lower()
-    if text == "" then
-      filtered = vim.deepcopy(all_items)
-    else
-      filtered = {}
-      for _, item in ipairs(all_items) do
-        if item.node == nil or (item.title_lower and item.title_lower:find(text, 1, true)) then
-          filtered[#filtered + 1] = item
-        end
+    filtered = {}
+    for _, item in ipairs(items) do
+      if text == "" or item.always or (item.title_lower and item.title_lower:find(text, 1, true)) then
+        filtered[#filtered + 1] = item
       end
     end
     sel_row = 1
@@ -1153,15 +1686,91 @@ local function change_parent_action(V)
   end
 
   local function cleanup()
-    pcall(function() input_pop:unmount() end)
-    pcall(function() list_pop:unmount() end)
+    pcall(function()
+      input_pop:unmount()
+    end)
+    pcall(function()
+      list_pop:unmount()
+    end)
   end
 
   local function confirm()
-    local r = math.min(sel_row, #filtered)
-    local item = filtered[r]
+    local item = filtered[math.min(sel_row, #filtered)]
     vim.cmd("stopinsert")
     cleanup()
+    on_choose(item)
+  end
+
+  redraw_list()
+  vim.cmd("startinsert")
+
+  vim.api.nvim_create_autocmd({ "TextChangedI", "TextChanged" }, {
+    buffer = input_pop.bufnr,
+    callback = function()
+      filter(vim.api.nvim_buf_get_lines(input_pop.bufnr, 0, 1, false)[1] or "")
+    end,
+  })
+
+  local function map_input(lhs, fn)
+    vim.keymap.set({ "n", "i" }, lhs, fn, { buffer = input_pop.bufnr, nowait = true, silent = true })
+  end
+  map_input("<CR>", confirm)
+  map_input("<Esc>", function()
+    vim.cmd("stopinsert")
+    cleanup()
+    on_choose(nil)
+  end)
+  local function move(dir)
+    if #filtered == 0 then
+      return
+    end
+    sel_row = math.max(1, math.min(#filtered, sel_row + dir))
+    redraw_list()
+  end
+  map_input("<Down>", function()
+    move(1)
+  end)
+  map_input("<Up>", function()
+    move(-1)
+  end)
+  map_input("<C-j>", function()
+    move(1)
+  end)
+  map_input("<C-k>", function()
+    move(-1)
+  end)
+  map_input("<C-n>", function()
+    move(1)
+  end)
+  map_input("<C-p>", function()
+    move(-1)
+  end)
+end
+
+local function change_parent_action(V)
+  local node = selected_node(V)
+  if not node then
+    return
+  end
+  local prefix = node.path .. "/"
+
+  -- Build the full candidate list: (root) + all valid targets.
+  local items = { { label = "(root)", always = true, node = nil } }
+  local function collect(list)
+    for _, c in ipairs(list) do
+      local is_self = c.id == node.id
+      local is_desc = c.path:sub(1, #prefix) == prefix
+      if not is_self and not is_desc then
+        local indent = string.rep("  ", c.depth)
+        local title = (c.issue and c.issue.Title or c.id):sub(1, 50)
+        items[#items + 1] = { label = indent .. title, title_lower = title:lower(), node = c }
+      end
+      collect(c.children)
+    end
+  end
+  collect(V.model.issues)
+
+  fuzzy_pick("reparent", items, function(item)
     if not item then
       return
     end
@@ -1175,42 +1784,88 @@ local function change_parent_action(V)
       V.expanded[target.id] = true
     end
     reload_select(V, node.id)
-  end
-
-  redraw_list()
-  vim.cmd("startinsert")
-
-  vim.api.nvim_create_autocmd({ "TextChangedI", "TextChanged" }, {
-    buffer = input_pop.bufnr,
-    callback = function()
-      local text = vim.api.nvim_buf_get_lines(input_pop.bufnr, 0, 1, false)[1] or ""
-      filter(text)
-    end,
-  })
-
-  local ib = input_pop.bufnr
-  local function map_input(lhs, fn)
-    vim.keymap.set({ "n", "i" }, lhs, fn, { buffer = ib, nowait = true, silent = true })
-  end
-  map_input("<CR>", confirm)
-  map_input("<Esc>", function()
-    vim.cmd("stopinsert")
-    cleanup()
   end)
-  local function move(dir)
-    local max = #filtered
-    if max == 0 then return end
-    sel_row = sel_row + dir
-    if sel_row < 1 then sel_row = 1 end
-    if sel_row > max then sel_row = max end
-    redraw_list()
+end
+
+-- Fuzzy-jump to any issue across the whole tree, regardless of the current
+-- scope/filter. Selecting one switches to the All scope, expands ancestors and
+-- moves the cursor to it.
+local function jump_to_issue(V)
+  local items = {}
+  local function collect(list)
+    for _, c in ipairs(list) do
+      if c.issue then
+        local title = (c.issue.Title or "(untitled)"):sub(1, 50)
+        items[#items + 1] = { label = icons.glyph(c.issue.Status) .. " " .. title, title_lower = title:lower(), node = c }
+      end
+      collect(c.children)
+    end
   end
-  map_input("<Down>", function() move(1) end)
-  map_input("<Up>", function() move(-1) end)
-  map_input("<C-j>", function() move(1) end)
-  map_input("<C-k>", function() move(-1) end)
-  map_input("<C-n>", function() move(1) end)
-  map_input("<C-p>", function() move(-1) end)
+  collect(V.model.issues)
+  if #items == 0 then
+    return
+  end
+  fuzzy_pick("jump", items, function(item)
+    if not (item and item.node) then
+      return
+    end
+    V.scope = { kind = "all" }
+    V.search = ""
+    V.field_filter = nil
+    for _, n in ipairs(flatten(V.model)) do
+      if #n.children > 0 then
+        V.expanded[n.id] = true
+      end
+    end
+    reload_select(V, item.node.id)
+    focus(V, "issues")
+  end)
+end
+
+-- Advance Status to the next value in config.issue_status (wraps).
+local function cycle_status(V)
+  local node = selected_node(V)
+  if not node or not node.issue then
+    return
+  end
+  local statuses = config.issue_status
+  if not statuses or #statuses == 0 then
+    return
+  end
+  local idx = 0
+  for i, s in ipairs(statuses) do
+    if s == node.issue.Status then
+      idx = i
+      break
+    end
+  end
+  apply_field(V, node, "Status", statuses[(idx % #statuses) + 1])
+end
+
+-- Yank the selected issue's id to the unnamed and system clipboard registers.
+local function yank_id(V)
+  local node = selected_node(V)
+  if not node or not node.issue then
+    return
+  end
+  local id = tostring(node.issue.Id or node.id)
+  vim.fn.setreg('"', id)
+  vim.fn.setreg("+", id)
+  vim.notify("lazyissues: yanked " .. id, vim.log.levels.INFO)
+end
+
+-- Open the selected issue's raw issue.json in a new tab (UI stays put).
+local function open_raw(V)
+  local node = selected_node(V)
+  if not node then
+    return
+  end
+  local file = node.path .. "/issue.json"
+  if vim.fn.filereadable(file) == 0 then
+    vim.notify("lazyissues: no file at " .. file, vim.log.levels.ERROR)
+    return
+  end
+  vim.cmd("tabedit " .. vim.fn.fnameescape(file))
 end
 
 -- Discoverable edit menu: a popup listing every field (with current values) and
@@ -1301,7 +1956,7 @@ local function edit_menu(V)
             return done(reopen)
           end
           local cur = (type(node2.issue[fname]) == "table" and table.concat(node2.issue[fname], ", ")) or ""
-          vim.ui.input({ prompt = fname .. " (comma-separated): ", default = cur }, function(input)
+          prompt_input(fname .. " (comma-separated)", cur, function(input)
             if input ~= nil then
               local items2 = {}
               for t in input:gmatch("[^,]+") do
@@ -1333,7 +1988,7 @@ local function edit_menu(V)
           if cur == vim.NIL then
             cur = ""
           end
-          vim.ui.input({ prompt = fname .. ": ", default = tostring(cur or "") }, function(input)
+          prompt_input(fname .. ":", tostring(cur or ""), function(input)
             if input ~= nil then
               apply_field(V, node2, fname, tonumber(input))
             end
@@ -1455,7 +2110,7 @@ local function selected_sprint(V)
 end
 
 local function create_sprint_action(V)
-  vim.ui.input({ prompt = "New sprint name: " }, function(name)
+  prompt_input("New sprint name", "", function(name)
     if name == nil or vim.trim(name) == "" then
       return
     end
@@ -1494,7 +2149,7 @@ local function sprint_edit_menu(V)
   }
   local dispatch = {
     name = function()
-      vim.ui.input({ prompt = "Sprint name: ", default = sp.Name or "" }, function(v)
+      prompt_input("Sprint name:", sp.Name or "", function(v)
         if v ~= nil and vim.trim(v) ~= "" then
           sp.Name = v
           save()
@@ -1513,7 +2168,7 @@ local function sprint_edit_menu(V)
       end, reopen)
     end,
     status = function()
-      vim.ui.select(config.sprint_status, { prompt = "Sprint status:" }, function(v)
+      prompt_select("Sprint status:", config.sprint_status, function(v)
         if v then
           sp.Status = v
           save()
@@ -1522,7 +2177,7 @@ local function sprint_edit_menu(V)
       end)
     end,
     delete = function()
-      vim.ui.select({ "No", "Yes" }, { prompt = 'Delete sprint "' .. (sp.Name or "") .. '"?' }, function(c)
+      prompt_select('Delete sprint "' .. (sp.Name or "") .. '"?', { "No", "Yes" }, function(c)
         if c == "Yes" then
           local ok, err = actions.delete_sprint(sp._path)
           if not ok then
@@ -1583,7 +2238,7 @@ local function selected_release(V)
 end
 
 local function create_release_action(V)
-  vim.ui.input({ prompt = "New release name: " }, function(name)
+  prompt_input("New release name", "", function(name)
     if name == nil or vim.trim(name) == "" then
       return
     end
@@ -1598,7 +2253,16 @@ end
 
 -- Release notes preview: issues in the release's sprints that have a non-None,
 -- non-blank release note, grouped by type (Features / Improvements / Fixes / Tasks).
-local function release_notes_preview(V, rel, on_close)
+-- Group an order for rendering/exporting release notes: { issue type, heading }.
+local RN_ORDER = {
+  { "Feature", "Features" },
+  { "Improvement", "Improvements" },
+  { "Bug", "Fixes" },
+  { "Task", "Tasks" },
+}
+
+-- Collect release-note entries for a release, bucketed by issue type.
+local function release_note_groups(V, rel)
   local sprint_ids = {}
   for _, sp in ipairs(V.model.sprints) do
     if sp.ReleaseId == rel.Id then
@@ -1626,6 +2290,106 @@ local function release_notes_preview(V, rel, on_close)
   for _, n in ipairs(V.model.issues) do
     walk(n)
   end
+  return groups
+end
+
+-- Write a release's notes to a markdown file under the data root.
+local function export_release_notes(V, rel)
+  local groups = release_note_groups(V, rel)
+  local out = { "# Release notes — " .. (rel.Name or ""), "" }
+  local any = false
+  for _, grp in ipairs(RN_ORDER) do
+    local items = groups[grp[1]]
+    if #items > 0 then
+      any = true
+      out[#out + 1] = "## " .. grp[2]
+      out[#out + 1] = ""
+      for _, x in ipairs(items) do
+        out[#out + 1] = "- **" .. x.title .. "**" .. (x.open and " _(open)_" or "")
+        for _, nl in ipairs(vim.split(x.note, "\n", { plain = true })) do
+          out[#out + 1] = "  " .. nl
+        end
+      end
+      out[#out + 1] = ""
+    end
+  end
+  if not any then
+    out[#out + 1] = "_(no release notes for this release)_"
+  end
+  local safe = (rel.Name or "release"):gsub("[^%w%-_]", "_")
+  local file = V.root .. "/release-notes-" .. safe .. ".md"
+  local ok, err = pcall(vim.fn.writefile, out, file)
+  if not ok then
+    vim.notify("lazyissues: " .. tostring(err), vim.log.levels.ERROR)
+    return
+  end
+  vim.notify("lazyissues: wrote " .. file, vim.log.levels.INFO)
+end
+
+-- Per-sprint open/closed counts and % complete, plus a backlog row.
+local function sprint_stats(V)
+  local by = {}
+  for _, n in ipairs(flatten(V.model)) do
+    local it = n.issue
+    if it then
+      local sid = it.SprintId or config.empty_guid
+      by[sid] = by[sid] or { open = 0, closed = 0 }
+      if it.Status == "Closed" then
+        by[sid].closed = by[sid].closed + 1
+      else
+        by[sid].open = by[sid].open + 1
+      end
+    end
+  end
+  local lines, hls = {}, {}
+  local function add(t, h)
+    lines[#lines + 1] = t
+    if h then
+      hls[#hls + 1] = { #lines - 1, h }
+    end
+  end
+  local function row(name, c)
+    local total = c.open + c.closed
+    local pct = total > 0 and math.floor(c.closed / total * 100 + 0.5) or 0
+    add(string.format("  %-26s %3d open  %3d done  %3d%%", name:sub(1, 26), c.open, c.closed, pct))
+  end
+  add("  Sprint stats", "LazyIssuesHeader")
+  add("")
+  local totals = { open = 0, closed = 0 }
+  for _, sp in ipairs(V.model.sprints) do
+    local c = by[sp.Id] or { open = 0, closed = 0 }
+    row(sp.Name or "(unnamed)", c)
+    totals.open = totals.open + c.open
+    totals.closed = totals.closed + c.closed
+  end
+  local backlog = by[config.empty_guid] or { open = 0, closed = 0 }
+  row("(backlog)", backlog)
+  totals.open = totals.open + backlog.open
+  totals.closed = totals.closed + backlog.closed
+  add("")
+  row("All issues", totals)
+  info_popup("Sprint stats", lines, hls, { height = "50%" })
+end
+
+-- Render the selected issue's Description (or ReleaseNote) as a markdown popup.
+local function markdown_preview(V, key, label)
+  local node = selected_node(V)
+  if not node or not node.issue then
+    return
+  end
+  local text = node.issue[key]
+  if text == vim.NIL then
+    text = nil
+  end
+  if not text or vim.trim(tostring(text)) == "" then
+    vim.notify("lazyissues: no " .. label, vim.log.levels.INFO)
+    return
+  end
+  info_popup(label, vim.split(tostring(text), "\n", { plain = true }), nil, { filetype = "markdown" })
+end
+
+local function release_notes_preview(V, rel, on_close)
+  local groups = release_note_groups(V, rel)
 
   local lines, hls = {}, {}
   local function add(t, h)
@@ -1636,14 +2400,8 @@ local function release_notes_preview(V, rel, on_close)
   end
   add("  Release notes — " .. (rel.Name or ""), "LazyIssuesHeader")
   add("")
-  local order = {
-    { "Feature", "Features" },
-    { "Improvement", "Improvements" },
-    { "Bug", "Fixes" },
-    { "Task", "Tasks" },
-  }
   local any = false
-  for _, grp in ipairs(order) do
+  for _, grp in ipairs(RN_ORDER) do
     local items = groups[grp[1]]
     if #items > 0 then
       any = true
@@ -1661,15 +2419,16 @@ local function release_notes_preview(V, rel, on_close)
     add("  (no release notes for this release)", "LazyIssuesDim")
   end
 
-  local Popup = require("nui.popup")
   local pop = Popup({
     enter = true,
     border = {
       style = "rounded",
+      highlight = "LazyIssuesBorder",
       text = { top = " Release notes ", top_align = "center", bottom = " q close ", bottom_align = "center" },
     },
     position = "50%",
     size = { width = "60%", height = "60%" },
+    zindex = 60,
     buf_options = { modifiable = false, filetype = "markdown" },
     win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder", wrap = true },
   })
@@ -1721,12 +2480,13 @@ local function release_edit_menu(V)
     Menu.item("  + Add sprint", { action = "addsprint" }),
     Menu.item("  − Remove sprint", { action = "removesprint" }),
     Menu.item("  ≣ Release notes", { action = "notes" }),
+    Menu.item("  ⬇ Export notes (.md)", { action = "export" }),
     Menu.separator("actions"),
     Menu.item("  ✗ Delete release", { action = "delete" }),
   }
   local dispatch = {
     name = function()
-      vim.ui.input({ prompt = "Release name: ", default = rel.Name or "" }, function(v)
+      prompt_input("Release name:", rel.Name or "", function(v)
         if v ~= nil and vim.trim(v) ~= "" then
           rel.Name = v
           save()
@@ -1745,7 +2505,7 @@ local function release_edit_menu(V)
       end, reopen)
     end,
     status = function()
-      vim.ui.select(config.release_status, { prompt = "Release status:" }, function(v)
+      prompt_select("Release status:", config.release_status, function(v)
         if v then
           rel.Status = v
           save()
@@ -1765,7 +2525,7 @@ local function release_edit_menu(V)
         vim.notify("lazyissues: no other sprints to add", vim.log.levels.INFO)
         return reopen()
       end
-      vim.ui.select(items, { prompt = "Add sprint to release:" }, function(c)
+      prompt_select("Add sprint to release:", items, function(c)
         if c then
           map[c].ReleaseId = rel.Id
           actions.save_sprint(map[c]._path, map[c])
@@ -1786,7 +2546,7 @@ local function release_edit_menu(V)
         vim.notify("lazyissues: no sprints in this release", vim.log.levels.INFO)
         return reopen()
       end
-      vim.ui.select(items, { prompt = "Remove sprint from release:" }, function(c)
+      prompt_select("Remove sprint from release:", items, function(c)
         if c then
           map[c].ReleaseId = config.empty_guid
           actions.save_sprint(map[c]._path, map[c])
@@ -1798,8 +2558,12 @@ local function release_edit_menu(V)
     notes = function()
       release_notes_preview(V, rel, reopen)
     end,
+    export = function()
+      export_release_notes(V, rel)
+      reopen()
+    end,
     delete = function()
-      vim.ui.select({ "No", "Yes" }, { prompt = 'Delete release "' .. (rel.Name or "") .. '"?' }, function(c)
+      prompt_select('Delete release "' .. (rel.Name or "") .. '"?', { "No", "Yes" }, function(c)
         if c == "Yes" then
           -- Cascade: clear ReleaseId on every sprint pointing at this release.
           for _, sp in ipairs(V.model.sprints) do
@@ -1885,6 +2649,18 @@ local function map_keys(V, bufnr, kind)
   map("/", function()
     do_search(V)
   end)
+  map("f", function()
+    field_filter_action(V)
+  end)
+  map("F", function()
+    jump_to_issue(V)
+  end)
+  map("gs", function()
+    sort_action(V)
+  end)
+  map("gS", function()
+    sprint_stats(V)
+  end)
   map("r", function()
     reload(V)
   end)
@@ -1937,6 +2713,18 @@ local function map_keys(V, bufnr, kind)
     map("<Space>", function()
       toggle_expand(V)
     end)
+    map("zR", function()
+      set_all_expanded(V, true)
+    end)
+    map("zM", function()
+      set_all_expanded(V, false)
+    end)
+    map("]c", function()
+      jump_changed(V, 1)
+    end)
+    map("[c", function()
+      jump_changed(V, -1)
+    end)
     map("l", function()
       focus(V, "detail")
     end)
@@ -1946,6 +2734,15 @@ local function map_keys(V, bufnr, kind)
     -- Field edits
     map("s", function()
       picker(V, "Status", config.issue_status, "Status:")
+    end)
+    map("S", function()
+      cycle_status(V)
+    end)
+    map("y", function()
+      yank_id(V)
+    end)
+    map("gf", function()
+      open_raw(V)
     end)
     map("p", function()
       picker(V, "Priority", config.issue_priority, "Priority:")
@@ -1970,6 +2767,9 @@ local function map_keys(V, bufnr, kind)
     map("d", function()
       edit_multiline(V, "Description", "Description")
     end)
+    map("K", function()
+      markdown_preview(V, "Description", "Description")
+    end)
     map("T", function()
       edit_tags(V)
     end)
@@ -1992,6 +2792,17 @@ local function map_keys(V, bufnr, kind)
     map("P", function()
       change_parent_action(V)
     end)
+    -- Multi-select + bulk
+    map("x", function()
+      toggle_mark(V)
+    end)
+    map("X", function()
+      V.marked = {}
+      refresh(V, true)
+    end)
+    map("b", function()
+      bulk_action(V)
+    end)
   end
 end
 
@@ -2008,15 +2819,20 @@ function M.help()
   local lines = {
     "",
     "  Navigation",
-    "    Tab / S-Tab    cycle panels         1 2 3 4 5   jump to a panel",
-    "    j / k          move cursor          <CR>        select / open",
-    "    <Space>        expand / collapse    /           search by title",
-    "    l / h          detail / scopes      r           reload",
-    "    E              edit template    ? / q / <Esc>  help / close",
+    "    Tab / S-Tab   cycle panels      1-5        jump to a panel",
+    "    j / k         move cursor       <CR>       select / open",
+    "    <Space>       expand/collapse   zR / zM    expand / collapse all",
+    "    l / h         detail / scopes   ]c / [c    next/prev branch-edit",
+    "    / search      f filter          F jump     gs sort    gS stats",
+    "    r reload      E edit template   ? / q / <Esc>  help / close",
     "",
     "  Edit selected issue",
-    "    e edit menu   c comments   o new   D delete   P re-parent",
-    "    quick:  s status  p priority  t type  a assignee  m sprint",
+    "    e edit menu   c comments   o new   O child   D delete   P re-parent",
+    "    quick:  s status  S cycle  p priority  t type  a assignee  m sprint",
+    "    T tags   d desc   n note-type   N note   K preview   y yank id   gf raw",
+    "",
+    "  Multi-select",
+    "    x mark   X clear   b bulk (set status / priority / sprint, or delete)",
     "",
     "  Sprints / Releases panels",
     "    <Space> expand   <CR> filter   o new   e edit (status, sprints, notes)",
@@ -2032,21 +2848,22 @@ function M.help()
   }
 
   local top = NuiLine()
-  top:append(" lazyissues ", "FloatBorder")
+  top:append(" lazyissues ", "LazyIssuesBorder")
   top:append("help", "FloatTitle")
-  top:append(" ", "FloatBorder")
+  top:append(" ", "LazyIssuesBorder")
   local bottom = NuiLine()
-  bottom:append(" q / Esc / ? to close ", "FloatBorder")
+  bottom:append(" q / Esc / ? to close ", "LazyIssuesBorder")
 
-  local Popup = require("nui.popup")
   local pop = Popup({
     enter = true,
     border = {
       style = "rounded",
+      highlight = "LazyIssuesBorder",
       text = { top = top, top_align = "center", bottom = bottom, bottom_align = "center" },
     },
     position = "50%",
-    size = { width = 68, height = #lines },
+    size = { width = 76, height = #lines },
+    zindex = 60,
     buf_options = { modifiable = false, filetype = "lazyissues-help" },
     win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder" },
   })
@@ -2228,10 +3045,7 @@ local function configure_enum_values(selected_fields, existing_template, on_done
     end
     local f = enums[idx]
     local cur = table.concat(f.values or {}, ", ")
-    vim.ui.input({
-      prompt = f.name .. " values (comma-separated): ",
-      default = cur,
-    }, function(input)
+    prompt_input(f.name .. " values (comma-separated)", cur, function(input)
       if input and vim.trim(input) ~= "" then
         local vals = {}
         for v in input:gmatch("[^,]+") do
@@ -2287,7 +3101,7 @@ local function finalize_template(data_root, selected_fields, existing_template, 
       local f = added[i]
       local prompt = "Default value for new field '" .. f.name .. "': "
       if f.type == "enum" and f.values then
-        vim.ui.select(f.values, { prompt = prompt }, function(choice)
+        prompt_select(prompt, f.values, function(choice)
           if choice then
             actions.backfill_field(data_root, f.name, choice)
           else
@@ -2298,7 +3112,7 @@ local function finalize_template(data_root, selected_fields, existing_template, 
           end)
         end)
       elseif f.type == "number" then
-        vim.ui.input({ prompt = prompt, default = "0" }, function(input)
+        prompt_input(prompt, "0", function(input)
           local val = tonumber(input) or f.default
           actions.backfill_field(data_root, f.name, val)
           vim.schedule(function()
@@ -2311,7 +3125,7 @@ local function finalize_template(data_root, selected_fields, existing_template, 
           process_added(i + 1, cb)
         end)
       else
-        vim.ui.input({ prompt = prompt, default = tostring(f.default or "") }, function(input)
+        prompt_input(prompt, tostring(f.default or ""), function(input)
           actions.backfill_field(data_root, f.name, input or f.default or "")
           vim.schedule(function()
             process_added(i + 1, cb)
@@ -2326,9 +3140,9 @@ local function finalize_template(data_root, selected_fields, existing_template, 
         return cb()
       end
       local f = removed[i]
-      vim.ui.select(
+      prompt_select(
+        "Field '" .. f.name .. "' removed:",
         { "Delete from all issues", "Keep data (orphaned)" },
-        { prompt = "Field '" .. f.name .. "' removed:" },
         function(choice)
           if choice and choice:find("^Delete") then
             actions.remove_field_from_issues(data_root, f.name)
@@ -2511,6 +3325,7 @@ function M.open()
     search = "",
     expanded = {},
     sprint_expanded = {},
+    marked = {},
     scopes = panel(1, "Scopes"),
     sprints = panel(2, "Sprints"),
     releases = panel(3, "Releases"),
@@ -2596,6 +3411,14 @@ function M.open()
     buffer = V.issues.bufnr,
     callback = function()
       render_detail(V, selected_node(V))
+      update_scrollbar(V.issues)
+    end,
+  })
+  -- Keep every panel's scrollbar in sync as windows scroll.
+  vim.api.nvim_create_autocmd("WinScrolled", {
+    group = V.augroup,
+    callback = function()
+      update_scrollbars(V)
     end,
   })
   -- nvim_set_current_win (Tab / 1-5 / l / h) fires WinEnter, so the footer tracks focus.

@@ -79,16 +79,21 @@ choose which fields your issues should have.
 | Key | Action |
 |-----|--------|
 | `Tab` / `S-Tab`, `1`–`5` | cycle / jump panels |
-| `j` `k` | move · `<Space>` expand/collapse sub-issues |
+| `j` `k` | move · `<Space>` expand/collapse · `zR` / `zM` expand/collapse all |
 | `<CR>` | select scope/sprint/release · open issue |
-| `/` | search by title · `r` reload · `?` help · `q` quit |
-| `E` | **edit template** (add/remove fields, configure enums) |
+| `/` | live filter (title, id, assignee, tags, description) |
+| `f` / `F` | filter by field value / fuzzy-jump to any issue |
+| `gs` / `gS` | sort issues / sprint stats |
+| `]c` / `[c` | next / prev issue edited on this branch |
+| `r` reload · `?` help · `q` quit · `E` | **edit template** |
 | **Issues:** `e` | **edit menu** (all fields + actions) |
-| `c` | comments (add/delete) |
+| `c` | comments (add/delete) · `K` preview description |
 | `o` / `O` | new issue / new child issue |
 | `D` / `P` | delete / re-parent (with filterable picker) |
-| quick: `s` `p` `t` `a` `m` | status / priority / type / assignee / sprint |
-| **Sprints/Releases:** `o` / `e` | new / edit (status, sprint links, notes) |
+| `x` / `X` / `b` | mark / clear marks / bulk action on marked |
+| `y` / `gf` | yank issue id / open raw `issue.json` |
+| quick: `s` `S` `p` `t` `a` `m` | status / cycle status / priority / type / assignee / sprint |
+| **Sprints/Releases:** `o` / `e` | new / edit (status, sprint links, notes, export) |
 
 ## Template
 

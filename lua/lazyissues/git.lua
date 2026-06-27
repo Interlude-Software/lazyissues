@@ -25,6 +25,14 @@ function M.repo_root(dir)
   return out and vim.trim(out) or nil
 end
 
+-- The configured git user.name, used to default a comment author when none are
+-- configured. Returns nil if unset or not a git repo.
+function M.user_name(dir)
+  local out = git(dir or ".", { "config", "user.name" })
+  out = out and vim.trim(out) or ""
+  return out ~= "" and out or nil
+end
+
 -- Best guess at the branch this work diverged from.
 local function base_ref(root)
   local out = git(root, { "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD" })
