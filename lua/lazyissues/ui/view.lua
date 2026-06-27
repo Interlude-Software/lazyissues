@@ -159,6 +159,39 @@ local function prompt_select(label, items, on_choice)
   menu:mount()
 end
 
+-- Simple centered read-only popup for reports/previews. `hls` is a list of
+-- { line_index, highlight_group } applied to whole lines. q/Esc closes.
+local function info_popup(title, lines, hls, opts)
+  opts = opts or {}
+  local pop = Popup({
+    enter = true,
+    border = {
+      style = "rounded",
+      highlight = "LazyIssuesBorder",
+      text = { top = " " .. title .. " ", top_align = "center", bottom = " q close ", bottom_align = "center" },
+    },
+    position = "50%",
+    size = { width = opts.width or "60%", height = opts.height or "60%" },
+    zindex = 60,
+    buf_options = { modifiable = false, filetype = opts.filetype or "lazyissues" },
+    win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder", wrap = true },
+  })
+  pop:mount()
+  vim.bo[pop.bufnr].modifiable = true
+  vim.api.nvim_buf_set_lines(pop.bufnr, 0, -1, false, lines)
+  vim.bo[pop.bufnr].modifiable = false
+  for _, h in ipairs(hls or {}) do
+    vim.api.nvim_buf_add_highlight(pop.bufnr, ns, h[2], h[1], 0, -1)
+  end
+  for _, k in ipairs({ "q", "<Esc>" }) do
+    vim.keymap.set("n", k, function()
+      pcall(function()
+        pop:unmount()
+      end)
+    end, { buffer = pop.bufnr })
+  end
+end
+
 -- Vertical scrollbar overlay for a panel. Drawn as a 1-column float pinned over
 -- the panel's right border, with a proportional thumb; shown only when the
 -- buffer overflows the window. Reuses one float/buffer per panel (p._sb).
@@ -2201,6 +2234,68 @@ local function export_release_notes(V, rel)
   vim.notify("lazyissues: wrote " .. file, vim.log.levels.INFO)
 end
 
+-- Per-sprint open/closed counts and % complete, plus a backlog row.
+local function sprint_stats(V)
+  local by = {}
+  for _, n in ipairs(flatten(V.model)) do
+    local it = n.issue
+    if it then
+      local sid = it.SprintId or config.empty_guid
+      by[sid] = by[sid] or { open = 0, closed = 0 }
+      if it.Status == "Closed" then
+        by[sid].closed = by[sid].closed + 1
+      else
+        by[sid].open = by[sid].open + 1
+      end
+    end
+  end
+  local lines, hls = {}, {}
+  local function add(t, h)
+    lines[#lines + 1] = t
+    if h then
+      hls[#hls + 1] = { #lines - 1, h }
+    end
+  end
+  local function row(name, c)
+    local total = c.open + c.closed
+    local pct = total > 0 and math.floor(c.closed / total * 100 + 0.5) or 0
+    add(string.format("  %-26s %3d open  %3d done  %3d%%", name:sub(1, 26), c.open, c.closed, pct))
+  end
+  add("  Sprint stats", "LazyIssuesHeader")
+  add("")
+  local totals = { open = 0, closed = 0 }
+  for _, sp in ipairs(V.model.sprints) do
+    local c = by[sp.Id] or { open = 0, closed = 0 }
+    row(sp.Name or "(unnamed)", c)
+    totals.open = totals.open + c.open
+    totals.closed = totals.closed + c.closed
+  end
+  local backlog = by[config.empty_guid] or { open = 0, closed = 0 }
+  row("(backlog)", backlog)
+  totals.open = totals.open + backlog.open
+  totals.closed = totals.closed + backlog.closed
+  add("")
+  row("All issues", totals)
+  info_popup("Sprint stats", lines, hls, { height = "50%" })
+end
+
+-- Render the selected issue's Description (or ReleaseNote) as a markdown popup.
+local function markdown_preview(V, key, label)
+  local node = selected_node(V)
+  if not node or not node.issue then
+    return
+  end
+  local text = node.issue[key]
+  if text == vim.NIL then
+    text = nil
+  end
+  if not text or vim.trim(tostring(text)) == "" then
+    vim.notify("lazyissues: no " .. label, vim.log.levels.INFO)
+    return
+  end
+  info_popup(label, vim.split(tostring(text), "\n", { plain = true }), nil, { filetype = "markdown" })
+end
+
 local function release_notes_preview(V, rel, on_close)
   local groups = release_note_groups(V, rel)
 
@@ -2471,6 +2566,9 @@ local function map_keys(V, bufnr, kind)
   map("gs", function()
     sort_action(V)
   end)
+  map("gS", function()
+    sprint_stats(V)
+  end)
   map("r", function()
     reload(V)
   end)
@@ -2576,6 +2674,9 @@ local function map_keys(V, bufnr, kind)
     end)
     map("d", function()
       edit_multiline(V, "Description", "Description")
+    end)
+    map("K", function()
+      markdown_preview(V, "Description", "Description")
     end)
     map("T", function()
       edit_tags(V)
