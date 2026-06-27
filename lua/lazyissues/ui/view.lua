@@ -970,7 +970,7 @@ local function pick_sprint(V, on_done)
     items[#items + 1] = sp.Name
     map[sp.Name] = sp.Id
   end
-  vim.ui.select(items, { prompt = "Sprint:" }, function(choice)
+  prompt_select("Sprint:", items, function(choice)
     if choice then
       apply_field(V, node, "SprintId", map[choice])
     end
