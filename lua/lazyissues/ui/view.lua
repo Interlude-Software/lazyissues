@@ -1873,7 +1873,7 @@ local function selected_release(V)
 end
 
 local function create_release_action(V)
-  vim.ui.input({ prompt = "New release name: " }, function(name)
+  prompt_input("New release name", "", function(name)
     if name == nil or vim.trim(name) == "" then
       return
     end
@@ -2016,7 +2016,7 @@ local function release_edit_menu(V)
   }
   local dispatch = {
     name = function()
-      vim.ui.input({ prompt = "Release name: ", default = rel.Name or "" }, function(v)
+      prompt_input("Release name:", rel.Name or "", function(v)
         if v ~= nil and vim.trim(v) ~= "" then
           rel.Name = v
           save()
@@ -2518,10 +2518,7 @@ local function configure_enum_values(selected_fields, existing_template, on_done
     end
     local f = enums[idx]
     local cur = table.concat(f.values or {}, ", ")
-    vim.ui.input({
-      prompt = f.name .. " values (comma-separated): ",
-      default = cur,
-    }, function(input)
+    prompt_input(f.name .. " values (comma-separated)", cur, function(input)
       if input and vim.trim(input) ~= "" then
         local vals = {}
         for v in input:gmatch("[^,]+") do
@@ -2588,7 +2585,7 @@ local function finalize_template(data_root, selected_fields, existing_template, 
           end)
         end)
       elseif f.type == "number" then
-        vim.ui.input({ prompt = prompt, default = "0" }, function(input)
+        prompt_input(prompt, "0", function(input)
           local val = tonumber(input) or f.default
           actions.backfill_field(data_root, f.name, val)
           vim.schedule(function()
@@ -2601,7 +2598,7 @@ local function finalize_template(data_root, selected_fields, existing_template, 
           process_added(i + 1, cb)
         end)
       else
-        vim.ui.input({ prompt = prompt, default = tostring(f.default or "") }, function(input)
+        prompt_input(prompt, tostring(f.default or ""), function(input)
           actions.backfill_field(data_root, f.name, input or f.default or "")
           vim.schedule(function()
             process_added(i + 1, cb)
