@@ -1517,7 +1517,7 @@ local function edit_menu(V)
             return done(reopen)
           end
           local cur = (type(node2.issue[fname]) == "table" and table.concat(node2.issue[fname], ", ")) or ""
-          vim.ui.input({ prompt = fname .. " (comma-separated): ", default = cur }, function(input)
+          prompt_input(fname .. " (comma-separated)", cur, function(input)
             if input ~= nil then
               local items2 = {}
               for t in input:gmatch("[^,]+") do
@@ -1549,7 +1549,7 @@ local function edit_menu(V)
           if cur == vim.NIL then
             cur = ""
           end
-          vim.ui.input({ prompt = fname .. ": ", default = tostring(cur or "") }, function(input)
+          prompt_input(fname .. ":", tostring(cur or ""), function(input)
             if input ~= nil then
               apply_field(V, node2, fname, tonumber(input))
             end
