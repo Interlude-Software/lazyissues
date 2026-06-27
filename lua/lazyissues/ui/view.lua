@@ -902,11 +902,10 @@ local function edit_text(V, key, prompt, on_done)
     cur = ""
   end
   prompt_input(prompt, tostring(cur or ""), function(input)
-    if input == nil then
-      return -- cancelled: back out of the edit menu instead of reopening it
+    if input ~= nil then
+      apply_field(V, node, key, input)
     end
-    apply_field(V, node, key, input)
-    done(on_done)
+    done(on_done) -- save or cancel both return to the edit menu hub
   end)
 end
 
@@ -920,7 +919,7 @@ local function edit_tags(V, on_done)
     return done(on_done)
   end
   local cur = (node.issue.Tags and table.concat(node.issue.Tags, ", ")) or ""
-  vim.ui.input({ prompt = "Tags (comma-separated): ", default = cur }, function(input)
+  prompt_input("Tags (comma-separated)", cur, function(input)
     if input ~= nil then
       local tags = {}
       for t in input:gmatch("[^,]+") do
@@ -931,11 +930,10 @@ local function edit_tags(V, on_done)
       end
       apply_field(V, node, "Tags", tags)
     end
-    done(on_done)
+    done(on_done) -- save or cancel both return to the edit menu hub
   end)
 end
 
--- Generic multiline editor popup. Calls on_accept(text) on Ctrl-s, on_close always.
 -- Multi-line editor: thin wrapper over prompt_input. on_accept fires only on
 -- save (Ctrl-s); on_close fires on both save and cancel.
 local function multiline_input(label, initial, on_accept, on_close)
@@ -963,11 +961,10 @@ local function edit_multiline(V, key, label, on_done)
     cur = ""
   end
   prompt_input(label, cur, function(txt)
-    if txt == nil then
-      return -- cancelled: back out of the edit menu instead of reopening it
+    if txt ~= nil then
+      apply_field(V, node, key, txt)
     end
-    apply_field(V, node, key, txt)
-    done(on_done)
+    done(on_done) -- save or cancel both return to the edit menu hub
   end, { multiline = true })
 end
 
