@@ -1961,7 +1961,7 @@ local function release_edit_menu(V)
       end, reopen)
     end,
     status = function()
-      vim.ui.select(config.release_status, { prompt = "Release status:" }, function(v)
+      prompt_select("Release status:", config.release_status, function(v)
         if v then
           rel.Status = v
           save()
@@ -1981,7 +1981,7 @@ local function release_edit_menu(V)
         vim.notify("lazyissues: no other sprints to add", vim.log.levels.INFO)
         return reopen()
       end
-      vim.ui.select(items, { prompt = "Add sprint to release:" }, function(c)
+      prompt_select("Add sprint to release:", items, function(c)
         if c then
           map[c].ReleaseId = rel.Id
           actions.save_sprint(map[c]._path, map[c])
@@ -2002,7 +2002,7 @@ local function release_edit_menu(V)
         vim.notify("lazyissues: no sprints in this release", vim.log.levels.INFO)
         return reopen()
       end
-      vim.ui.select(items, { prompt = "Remove sprint from release:" }, function(c)
+      prompt_select("Remove sprint from release:", items, function(c)
         if c then
           map[c].ReleaseId = config.empty_guid
           actions.save_sprint(map[c]._path, map[c])
@@ -2015,7 +2015,7 @@ local function release_edit_menu(V)
       release_notes_preview(V, rel, reopen)
     end,
     delete = function()
-      vim.ui.select({ "No", "Yes" }, { prompt = 'Delete release "' .. (rel.Name or "") .. '"?' }, function(c)
+      prompt_select('Delete release "' .. (rel.Name or "") .. '"?', { "No", "Yes" }, function(c)
         if c == "Yes" then
           -- Cascade: clear ReleaseId on every sprint pointing at this release.
           for _, sp in ipairs(V.model.sprints) do
