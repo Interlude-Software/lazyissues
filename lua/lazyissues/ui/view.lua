@@ -2503,7 +2503,7 @@ local function finalize_template(data_root, selected_fields, existing_template, 
       local f = added[i]
       local prompt = "Default value for new field '" .. f.name .. "': "
       if f.type == "enum" and f.values then
-        vim.ui.select(f.values, { prompt = prompt }, function(choice)
+        prompt_select(prompt, f.values, function(choice)
           if choice then
             actions.backfill_field(data_root, f.name, choice)
           else
@@ -2542,9 +2542,9 @@ local function finalize_template(data_root, selected_fields, existing_template, 
         return cb()
       end
       local f = removed[i]
-      vim.ui.select(
+      prompt_select(
+        "Field '" .. f.name .. "' removed:",
         { "Delete from all issues", "Keep data (orphaned)" },
-        { prompt = "Field '" .. f.name .. "' removed:" },
         function(choice)
           if choice and choice:find("^Delete") then
             actions.remove_field_from_issues(data_root, f.name)
