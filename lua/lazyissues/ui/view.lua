@@ -107,6 +107,58 @@ local function prompt_input(label, default, on_accept, opts)
   vim.cmd("startinsert!")
 end
 
+-- Centered menu popup. `items` is a list of strings, or { text=, value= } tables.
+-- on_choice receives the chosen value on select, or nil on cancel. Mirrors
+-- vim.ui.select's contract so callers can swap it in directly.
+local function prompt_select(label, items, on_choice)
+  local Menu = require("nui.menu")
+  local menu_items, width = {}, 0
+  for _, entry in ipairs(items) do
+    local text = type(entry) == "table" and entry.text or tostring(entry)
+    local value = type(entry) == "table" and entry.value or entry
+    menu_items[#menu_items + 1] = Menu.item(text, { value = value })
+    width = math.max(width, vim.api.nvim_strwidth(text))
+  end
+  width = math.max(width + 4, vim.api.nvim_strwidth(vim.trim(label)) + 4, 20)
+  local handled = false
+  local menu = Menu({
+    position = "50%",
+    size = { width = width, height = math.max(1, math.min(#menu_items, 12)) },
+    border = {
+      style = "rounded",
+      highlight = "LazyIssuesBorder",
+      text = {
+        top = " " .. vim.trim(label) .. " ",
+        top_align = "center",
+        bottom = " ↵ select · Esc cancel ",
+        bottom_align = "center",
+      },
+    },
+    zindex = 60,
+    win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder,CursorLine:PmenuSel" },
+  }, {
+    lines = menu_items,
+    keymap = {
+      focus_next = { "j", "<Down>" },
+      focus_prev = { "k", "<Up>" },
+      close = { "q", "<Esc>" },
+      submit = { "<CR>", "l" },
+    },
+    on_submit = function(item)
+      handled = true
+      if on_choice then
+        on_choice(item.value)
+      end
+    end,
+    on_close = function()
+      if not handled and on_choice then
+        on_choice(nil)
+      end
+    end,
+  })
+  menu:mount()
+end
+
 -- Word-wrap text (honoring embedded newlines) to `width` columns.
 local function wrap(text, width)
   width = math.max(10, width or 40)
@@ -896,7 +948,7 @@ local function picker(V, key, items, prompt, transform, on_done)
     locked_notify()
     return done(on_done)
   end
-  vim.ui.select(items, { prompt = prompt }, function(choice)
+  prompt_select(prompt, items, function(choice)
     if choice then
       apply_field(V, node, key, transform and transform(choice) or choice)
     end
