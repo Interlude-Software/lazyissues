@@ -34,9 +34,13 @@ local function short(id)
   return tostring(id):sub(1, 8)
 end
 
--- Centered single-line input popup. Mirrors vim.ui.input's contract: on_accept
--- receives the entered string on confirm, or nil on cancel.
-local function prompt_input(label, default, on_accept)
+-- Centered input popup. Single-line by default (Enter confirms); pass
+-- opts.multiline for a taller, wrapping editor (Ctrl-s saves, Esc cancels).
+-- opts.width / opts.height override the size. Mirrors vim.ui.input's contract:
+-- on_accept gets the text on confirm, nil on cancel.
+local function prompt_input(label, default, on_accept, opts)
+  opts = opts or {}
+  local multiline = opts.multiline
   local pop = Popup({
     enter = true,
     border = {
@@ -45,28 +49,32 @@ local function prompt_input(label, default, on_accept)
       text = {
         top = " " .. vim.trim(label) .. " ",
         top_align = "center",
-        bottom = " Enter confirm · Esc cancel ",
+        bottom = multiline and " Ctrl-s save · Esc cancel " or " Enter confirm · Esc cancel ",
         bottom_align = "center",
       },
     },
     position = "50%",
-    size = { width = "50%", height = 1 },
+    size = {
+      width = opts.width or (multiline and "60%" or "70%"),
+      height = opts.height or (multiline and "40%" or 1),
+    },
     zindex = 60,
-    buf_options = { modifiable = true },
-    win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder" },
+    buf_options = { modifiable = true, filetype = multiline and "markdown" or "" },
+    win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder", wrap = multiline or false },
   })
   pop:mount()
-  default = tostring(default or "")
-  if default ~= "" then
-    vim.api.nvim_buf_set_lines(pop.bufnr, 0, -1, false, { default })
-  end
+  vim.api.nvim_buf_set_lines(pop.bufnr, 0, -1, false, vim.split(tostring(default or ""), "\n", { plain = true }))
   local finished = false
   local function finish(accept)
     if finished then
       return
     end
     finished = true
-    local txt = accept and (vim.api.nvim_buf_get_lines(pop.bufnr, 0, 1, false)[1] or "") or nil
+    local txt
+    if accept then
+      local lines = vim.api.nvim_buf_get_lines(pop.bufnr, 0, -1, false)
+      txt = multiline and table.concat(lines, "\n") or (lines[1] or "")
+    end
     pcall(function()
       pop:unmount()
     end)
@@ -74,13 +82,28 @@ local function prompt_input(label, default, on_accept)
       on_accept(txt)
     end
   end
-  vim.keymap.set({ "n", "i" }, "<CR>", function()
-    finish(true)
-  end, { buffer = pop.bufnr })
-  vim.keymap.set({ "n", "i" }, "<Esc>", function()
-    finish(false)
-  end, { buffer = pop.bufnr })
-  pcall(vim.api.nvim_win_set_cursor, pop.winid, { 1, #default })
+  if multiline then
+    -- Enter inserts a newline; Ctrl-s saves; Esc/q (normal mode) cancels.
+    vim.keymap.set({ "n", "i" }, "<C-s>", function()
+      finish(true)
+    end, { buffer = pop.bufnr })
+    for _, k in ipairs({ "<Esc>", "q" }) do
+      vim.keymap.set("n", k, function()
+        finish(false)
+      end, { buffer = pop.bufnr })
+    end
+  else
+    vim.keymap.set({ "n", "i" }, "<CR>", function()
+      finish(true)
+    end, { buffer = pop.bufnr })
+    vim.keymap.set({ "n", "i" }, "<Esc>", function()
+      finish(false)
+    end, { buffer = pop.bufnr })
+  end
+  -- Cursor at the end of the prefilled content.
+  local last = vim.api.nvim_buf_line_count(pop.bufnr)
+  local last_line = vim.api.nvim_buf_get_lines(pop.bufnr, last - 1, last, false)[1] or ""
+  pcall(vim.api.nvim_win_set_cursor, pop.winid, { last, #last_line })
   vim.cmd("startinsert!")
 end
 
@@ -878,10 +901,11 @@ local function edit_text(V, key, prompt, on_done)
   if cur == vim.NIL then
     cur = ""
   end
-  vim.ui.input({ prompt = prompt, default = tostring(cur or "") }, function(input)
-    if input ~= nil then
-      apply_field(V, node, key, input)
+  prompt_input(prompt, tostring(cur or ""), function(input)
+    if input == nil then
+      return -- cancelled: back out of the edit menu instead of reopening it
     end
+    apply_field(V, node, key, input)
     done(on_done)
   end)
 end
@@ -912,41 +936,17 @@ local function edit_tags(V, on_done)
 end
 
 -- Generic multiline editor popup. Calls on_accept(text) on Ctrl-s, on_close always.
+-- Multi-line editor: thin wrapper over prompt_input. on_accept fires only on
+-- save (Ctrl-s); on_close fires on both save and cancel.
 local function multiline_input(label, initial, on_accept, on_close)
-  local Popup = require("nui.popup")
-  local pop = Popup({
-    enter = true,
-    border = {
-      style = "rounded",
-      text = { top = " " .. label .. "  (Ctrl-s save · Esc cancel) ", top_align = "center" },
-    },
-    position = "50%",
-    size = { width = "60%", height = "40%" },
-    buf_options = { modifiable = true, filetype = "markdown" },
-    win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder", wrap = true },
-  })
-  pop:mount()
-  vim.api.nvim_buf_set_lines(pop.bufnr, 0, -1, false, vim.split(tostring(initial or ""), "\n", { plain = true }))
-  local function finish(accept)
-    local txt = accept and table.concat(vim.api.nvim_buf_get_lines(pop.bufnr, 0, -1, false), "\n") or nil
-    pcall(function()
-      pop:unmount()
-    end)
-    if accept and on_accept then
+  prompt_input(label, initial, function(txt)
+    if txt ~= nil and on_accept then
       on_accept(txt)
     end
     if on_close then
       on_close()
     end
-  end
-  vim.keymap.set({ "n", "i" }, "<C-s>", function()
-    finish(true)
-  end, { buffer = pop.bufnr })
-  for _, k in ipairs({ "<Esc>", "q" }) do
-    vim.keymap.set("n", k, function()
-      finish(false)
-    end, { buffer = pop.bufnr })
-  end
+  end, { multiline = true })
 end
 
 local function edit_multiline(V, key, label, on_done)
@@ -962,11 +962,13 @@ local function edit_multiline(V, key, label, on_done)
   if cur == vim.NIL then
     cur = ""
   end
-  multiline_input(label, cur, function(txt)
+  prompt_input(label, cur, function(txt)
+    if txt == nil then
+      return -- cancelled: back out of the edit menu instead of reopening it
+    end
     apply_field(V, node, key, txt)
-  end, function()
     done(on_done)
-  end)
+  end, { multiline = true })
 end
 
 -- Comments viewer/manager popup for the selected issue.
