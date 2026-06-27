@@ -836,6 +836,57 @@ local function multiline_input(label, initial, on_accept, on_close)
   end
 end
 
+-- Centered single-line input popup. Mirrors vim.ui.input's contract: on_accept
+-- receives the entered string on confirm, or nil on cancel.
+local function prompt_input(label, default, on_accept)
+  local Popup = require("nui.popup")
+  local pop = Popup({
+    enter = true,
+    border = {
+      style = "rounded",
+      highlight = "LazyIssuesBorder",
+      text = {
+        top = " " .. vim.trim(label) .. " ",
+        top_align = "center",
+        bottom = " Enter confirm · Esc cancel ",
+        bottom_align = "center",
+      },
+    },
+    position = "50%",
+    size = { width = "50%", height = 1 },
+    zindex = 60,
+    buf_options = { modifiable = true },
+    win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder" },
+  })
+  pop:mount()
+  default = tostring(default or "")
+  if default ~= "" then
+    vim.api.nvim_buf_set_lines(pop.bufnr, 0, -1, false, { default })
+  end
+  local finished = false
+  local function finish(accept)
+    if finished then
+      return
+    end
+    finished = true
+    local txt = accept and (vim.api.nvim_buf_get_lines(pop.bufnr, 0, 1, false)[1] or "") or nil
+    pcall(function()
+      pop:unmount()
+    end)
+    if on_accept then
+      on_accept(txt)
+    end
+  end
+  vim.keymap.set({ "n", "i" }, "<CR>", function()
+    finish(true)
+  end, { buffer = pop.bufnr })
+  vim.keymap.set({ "n", "i" }, "<Esc>", function()
+    finish(false)
+  end, { buffer = pop.bufnr })
+  pcall(vim.api.nvim_win_set_cursor, pop.winid, { 1, #default })
+  vim.cmd("startinsert!")
+end
+
 local function edit_multiline(V, key, label, on_done)
   local node = selected_node(V)
   if not node then
@@ -972,8 +1023,8 @@ local function comments_view(V, on_close)
 end
 
 local function create_issue_action(V, parent_node)
-  local label = parent_node and "New child issue title: " or "New issue title: "
-  vim.ui.input({ prompt = label }, function(title)
+  local label = parent_node and "New child issue title" or "New issue title"
+  prompt_input(label, nil, function(title)
     if title == nil or vim.trim(title) == "" then
       return
     end
