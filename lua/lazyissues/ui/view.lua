@@ -1224,7 +1224,7 @@ local function delete_action(V)
   count_desc(node)
   local title = (node.issue and node.issue.Title or node.id):sub(1, 40)
   local extra = n > 0 and (" and " .. n .. " sub-issue(s)") or ""
-  vim.ui.select({ "No", "Yes" }, { prompt = 'Delete "' .. title .. '"' .. extra .. "?" }, function(c)
+  prompt_select('Delete "' .. title .. '"' .. extra .. "?", { "No", "Yes" }, function(c)
     if c == "Yes" then
       local ok, err = actions.delete_issue(node.path)
       if not ok then
