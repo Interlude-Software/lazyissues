@@ -1655,6 +1655,52 @@ local function jump_to_issue(V)
   end)
 end
 
+-- Advance Status to the next value in config.issue_status (wraps).
+local function cycle_status(V)
+  local node = selected_node(V)
+  if not node or not node.issue then
+    return
+  end
+  local statuses = config.issue_status
+  if not statuses or #statuses == 0 then
+    return
+  end
+  local idx = 0
+  for i, s in ipairs(statuses) do
+    if s == node.issue.Status then
+      idx = i
+      break
+    end
+  end
+  apply_field(V, node, "Status", statuses[(idx % #statuses) + 1])
+end
+
+-- Yank the selected issue's id to the unnamed and system clipboard registers.
+local function yank_id(V)
+  local node = selected_node(V)
+  if not node or not node.issue then
+    return
+  end
+  local id = tostring(node.issue.Id or node.id)
+  vim.fn.setreg('"', id)
+  vim.fn.setreg("+", id)
+  vim.notify("lazyissues: yanked " .. id, vim.log.levels.INFO)
+end
+
+-- Open the selected issue's raw issue.json in a new tab (UI stays put).
+local function open_raw(V)
+  local node = selected_node(V)
+  if not node then
+    return
+  end
+  local file = node.path .. "/issue.json"
+  if vim.fn.filereadable(file) == 0 then
+    vim.notify("lazyissues: no file at " .. file, vim.log.levels.ERROR)
+    return
+  end
+  vim.cmd("tabedit " .. vim.fn.fnameescape(file))
+end
+
 -- Discoverable edit menu: a popup listing every field (with current values) and
 -- the structural actions. Picking one dispatches to the matching action.
 local function edit_menu(V)
@@ -2406,6 +2452,15 @@ local function map_keys(V, bufnr, kind)
     -- Field edits
     map("s", function()
       picker(V, "Status", config.issue_status, "Status:")
+    end)
+    map("S", function()
+      cycle_status(V)
+    end)
+    map("y", function()
+      yank_id(V)
+    end)
+    map("gf", function()
+      open_raw(V)
     end)
     map("p", function()
       picker(V, "Priority", config.issue_priority, "Priority:")
