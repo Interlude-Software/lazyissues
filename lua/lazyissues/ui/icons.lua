@@ -56,6 +56,9 @@ function M.setup()
     LazyIssuesFooter = { fg = "#b8c0e0" },
     -- White border for all popups.
     LazyIssuesBorder = { fg = "#ffffff" },
+    -- Vertical scrollbar: bright thumb over a dim track.
+    LazyIssuesScrollThumb = { fg = "#b8c0e0" },
+    LazyIssuesScrollTrack = { fg = "#3a3a3a" },
   }
   for name, spec in pairs(hl) do
     spec.default = true

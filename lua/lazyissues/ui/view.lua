@@ -159,6 +159,75 @@ local function prompt_select(label, items, on_choice)
   menu:mount()
 end
 
+-- Vertical scrollbar overlay for a panel. Drawn as a 1-column float pinned over
+-- the panel's right border, with a proportional thumb; shown only when the
+-- buffer overflows the window. Reuses one float/buffer per panel (p._sb).
+local sb_ns = vim.api.nvim_create_namespace("lazyissues_scrollbar")
+
+local function close_scrollbar(p)
+  if p and p._sb then
+    if p._sb.win and vim.api.nvim_win_is_valid(p._sb.win) then
+      pcall(vim.api.nvim_win_close, p._sb.win, true)
+    end
+    p._sb = nil
+  end
+end
+
+local function update_scrollbar(p)
+  if not (p and p.winid and vim.api.nvim_win_is_valid(p.winid)) then
+    return close_scrollbar(p)
+  end
+  local total = vim.api.nvim_buf_line_count(p.bufnr)
+  local height = vim.api.nvim_win_get_height(p.winid)
+  if total <= height or height < 2 then
+    return close_scrollbar(p) -- nothing to scroll
+  end
+  local topline = (vim.fn.getwininfo(p.winid)[1] or {}).topline or 1
+  local thumb = math.max(1, math.floor(height * height / total + 0.5))
+  local maxpos = height - thumb
+  local pos = math.max(0, math.min(maxpos, math.floor((topline - 1) / (total - height) * maxpos + 0.5)))
+
+  if not (p._sb and vim.api.nvim_buf_is_valid(p._sb.buf)) then
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.bo[buf].bufhidden = "wipe"
+    p._sb = { buf = buf }
+  end
+  local lines = {}
+  for i = 0, height - 1 do
+    lines[i + 1] = (i >= pos and i < pos + thumb) and "█" or "│"
+  end
+  vim.api.nvim_buf_set_lines(p._sb.buf, 0, -1, false, lines)
+  vim.api.nvim_buf_clear_namespace(p._sb.buf, sb_ns, 0, -1)
+  for i = 0, height - 1 do
+    local g = (i >= pos and i < pos + thumb) and "LazyIssuesScrollThumb" or "LazyIssuesScrollTrack"
+    vim.api.nvim_buf_add_highlight(p._sb.buf, sb_ns, g, i, 0, -1)
+  end
+
+  local wpos = vim.api.nvim_win_get_position(p.winid)
+  local cfg = {
+    relative = "editor",
+    row = wpos[1],
+    col = wpos[2] + vim.api.nvim_win_get_width(p.winid), -- over the right border
+    width = 1,
+    height = height,
+    focusable = false,
+    style = "minimal",
+    zindex = 55,
+    noautocmd = true,
+  }
+  if p._sb.win and vim.api.nvim_win_is_valid(p._sb.win) then
+    vim.api.nvim_win_set_config(p._sb.win, cfg)
+  else
+    p._sb.win = vim.api.nvim_open_win(p._sb.buf, false, cfg)
+  end
+end
+
+local function update_scrollbars(V)
+  for _, key in ipairs({ "scopes", "sprints", "releases", "issues", "detail" }) do
+    update_scrollbar(V[key])
+  end
+end
+
 -- Word-wrap text (honoring embedded newlines) to `width` columns.
 local function wrap(text, width)
   width = math.max(10, width or 40)
@@ -678,6 +747,7 @@ local function render_detail(V, node)
   for _, h in ipairs(hls) do
     hl(bufnr, h[1], h[2], h[3], h[4])
   end
+  update_scrollbar(V.detail)
 end
 
 local function selected_node(V)
@@ -702,6 +772,7 @@ local function refresh(V, keep_cursor)
     pcall(vim.api.nvim_win_set_cursor, V.issues.winid, { 1, 0 })
   end
   render_detail(V, selected_node(V))
+  update_scrollbars(V)
 end
 
 -- ── interaction ─────────────────────────────────────────────────────────────
@@ -728,6 +799,9 @@ local function cycle_focus(V, dir)
 end
 
 local function close(V)
+  for _, key in ipairs({ "scopes", "sprints", "releases", "issues", "detail" }) do
+    close_scrollbar(V[key])
+  end
   if V.layout then
     pcall(function()
       V.layout:unmount()
@@ -2812,6 +2886,14 @@ function M.open()
     buffer = V.issues.bufnr,
     callback = function()
       render_detail(V, selected_node(V))
+      update_scrollbar(V.issues)
+    end,
+  })
+  -- Keep every panel's scrollbar in sync as windows scroll.
+  vim.api.nvim_create_autocmd("WinScrolled", {
+    group = V.augroup,
+    callback = function()
+      update_scrollbars(V)
     end,
   })
   -- nvim_set_current_win (Tab / 1-5 / l / h) fires WinEnter, so the footer tracks focus.
