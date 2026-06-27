@@ -2819,15 +2819,20 @@ function M.help()
   local lines = {
     "",
     "  Navigation",
-    "    Tab / S-Tab    cycle panels         1 2 3 4 5   jump to a panel",
-    "    j / k          move cursor          <CR>        select / open",
-    "    <Space>        expand / collapse    /           search by title",
-    "    l / h          detail / scopes      r           reload",
-    "    E              edit template    ? / q / <Esc>  help / close",
+    "    Tab / S-Tab   cycle panels      1-5        jump to a panel",
+    "    j / k         move cursor       <CR>       select / open",
+    "    <Space>       expand/collapse   zR / zM    expand / collapse all",
+    "    l / h         detail / scopes   ]c / [c    next/prev branch-edit",
+    "    / search      f filter          F jump     gs sort    gS stats",
+    "    r reload      E edit template   ? / q / <Esc>  help / close",
     "",
     "  Edit selected issue",
-    "    e edit menu   c comments   o new   D delete   P re-parent",
-    "    quick:  s status  p priority  t type  a assignee  m sprint",
+    "    e edit menu   c comments   o new   O child   D delete   P re-parent",
+    "    quick:  s status  S cycle  p priority  t type  a assignee  m sprint",
+    "    T tags   d desc   n note-type   N note   K preview   y yank id   gf raw",
+    "",
+    "  Multi-select",
+    "    x mark   X clear   b bulk (set status / priority / sprint, or delete)",
     "",
     "  Sprints / Releases panels",
     "    <Space> expand   <CR> filter   o new   e edit (status, sprints, notes)",
@@ -2843,21 +2848,22 @@ function M.help()
   }
 
   local top = NuiLine()
-  top:append(" lazyissues ", "FloatBorder")
+  top:append(" lazyissues ", "LazyIssuesBorder")
   top:append("help", "FloatTitle")
-  top:append(" ", "FloatBorder")
+  top:append(" ", "LazyIssuesBorder")
   local bottom = NuiLine()
-  bottom:append(" q / Esc / ? to close ", "FloatBorder")
+  bottom:append(" q / Esc / ? to close ", "LazyIssuesBorder")
 
-  local Popup = require("nui.popup")
   local pop = Popup({
     enter = true,
     border = {
       style = "rounded",
+      highlight = "LazyIssuesBorder",
       text = { top = top, top_align = "center", bottom = bottom, bottom_align = "center" },
     },
     position = "50%",
-    size = { width = 68, height = #lines },
+    size = { width = 76, height = #lines },
+    zindex = 60,
     buf_options = { modifiable = false, filetype = "lazyissues-help" },
     win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder" },
   })
