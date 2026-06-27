@@ -2128,7 +2128,16 @@ end
 
 -- Release notes preview: issues in the release's sprints that have a non-None,
 -- non-blank release note, grouped by type (Features / Improvements / Fixes / Tasks).
-local function release_notes_preview(V, rel, on_close)
+-- Group an order for rendering/exporting release notes: { issue type, heading }.
+local RN_ORDER = {
+  { "Feature", "Features" },
+  { "Improvement", "Improvements" },
+  { "Bug", "Fixes" },
+  { "Task", "Tasks" },
+}
+
+-- Collect release-note entries for a release, bucketed by issue type.
+local function release_note_groups(V, rel)
   local sprint_ids = {}
   for _, sp in ipairs(V.model.sprints) do
     if sp.ReleaseId == rel.Id then
@@ -2156,6 +2165,44 @@ local function release_notes_preview(V, rel, on_close)
   for _, n in ipairs(V.model.issues) do
     walk(n)
   end
+  return groups
+end
+
+-- Write a release's notes to a markdown file under the data root.
+local function export_release_notes(V, rel)
+  local groups = release_note_groups(V, rel)
+  local out = { "# Release notes — " .. (rel.Name or ""), "" }
+  local any = false
+  for _, grp in ipairs(RN_ORDER) do
+    local items = groups[grp[1]]
+    if #items > 0 then
+      any = true
+      out[#out + 1] = "## " .. grp[2]
+      out[#out + 1] = ""
+      for _, x in ipairs(items) do
+        out[#out + 1] = "- **" .. x.title .. "**" .. (x.open and " _(open)_" or "")
+        for _, nl in ipairs(vim.split(x.note, "\n", { plain = true })) do
+          out[#out + 1] = "  " .. nl
+        end
+      end
+      out[#out + 1] = ""
+    end
+  end
+  if not any then
+    out[#out + 1] = "_(no release notes for this release)_"
+  end
+  local safe = (rel.Name or "release"):gsub("[^%w%-_]", "_")
+  local file = V.root .. "/release-notes-" .. safe .. ".md"
+  local ok, err = pcall(vim.fn.writefile, out, file)
+  if not ok then
+    vim.notify("lazyissues: " .. tostring(err), vim.log.levels.ERROR)
+    return
+  end
+  vim.notify("lazyissues: wrote " .. file, vim.log.levels.INFO)
+end
+
+local function release_notes_preview(V, rel, on_close)
+  local groups = release_note_groups(V, rel)
 
   local lines, hls = {}, {}
   local function add(t, h)
@@ -2166,14 +2213,8 @@ local function release_notes_preview(V, rel, on_close)
   end
   add("  Release notes — " .. (rel.Name or ""), "LazyIssuesHeader")
   add("")
-  local order = {
-    { "Feature", "Features" },
-    { "Improvement", "Improvements" },
-    { "Bug", "Fixes" },
-    { "Task", "Tasks" },
-  }
   local any = false
-  for _, grp in ipairs(order) do
+  for _, grp in ipairs(RN_ORDER) do
     local items = groups[grp[1]]
     if #items > 0 then
       any = true
@@ -2191,15 +2232,16 @@ local function release_notes_preview(V, rel, on_close)
     add("  (no release notes for this release)", "LazyIssuesDim")
   end
 
-  local Popup = require("nui.popup")
   local pop = Popup({
     enter = true,
     border = {
       style = "rounded",
+      highlight = "LazyIssuesBorder",
       text = { top = " Release notes ", top_align = "center", bottom = " q close ", bottom_align = "center" },
     },
     position = "50%",
     size = { width = "60%", height = "60%" },
+    zindex = 60,
     buf_options = { modifiable = false, filetype = "markdown" },
     win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder", wrap = true },
   })
@@ -2251,6 +2293,7 @@ local function release_edit_menu(V)
     Menu.item("  + Add sprint", { action = "addsprint" }),
     Menu.item("  − Remove sprint", { action = "removesprint" }),
     Menu.item("  ≣ Release notes", { action = "notes" }),
+    Menu.item("  ⬇ Export notes (.md)", { action = "export" }),
     Menu.separator("actions"),
     Menu.item("  ✗ Delete release", { action = "delete" }),
   }
@@ -2327,6 +2370,10 @@ local function release_edit_menu(V)
     end,
     notes = function()
       release_notes_preview(V, rel, reopen)
+    end,
+    export = function()
+      export_release_notes(V, rel)
+      reopen()
     end,
     delete = function()
       prompt_select('Delete release "' .. (rel.Name or "") .. '"?', { "No", "Yes" }, function(c)
