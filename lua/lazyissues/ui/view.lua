@@ -1385,52 +1385,26 @@ local function delete_action(V)
   end)
 end
 
-local function change_parent_action(V)
-  local node = selected_node(V)
-  if not node then
-    return
-  end
-  local prefix = node.path .. "/"
-
-  -- Build the full candidate list: (root) + all valid targets.
-  local all_items = { { label = "(root)", node = nil } }
-  local function collect(list)
-    for _, c in ipairs(list) do
-      local is_self = c.id == node.id
-      local is_desc = c.path:sub(1, #prefix) == prefix
-      if not is_self and not is_desc then
-        local indent = string.rep("  ", c.depth)
-        local title = (c.issue and c.issue.Title or c.id):sub(1, 50)
-        all_items[#all_items + 1] = { label = indent .. title, title_lower = title:lower(), node = c }
-      end
-      collect(c.children)
-    end
-  end
-  collect(V.model.issues)
-
-  local Popup = require("nui.popup")
-
+-- Reusable fuzzy picker: a results list with a live-filter input below it.
+-- `items` is a list of { label=, title_lower=(optional), always=(optional), ... };
+-- items flagged `always` stay visible regardless of the query (e.g. a "(root)"
+-- row). on_choose receives the selected item, or nil if cancelled.
+local function fuzzy_pick(title_word, items, on_choose)
   local top = NuiLine()
   top:append(" lazyissues ", "LazyIssuesBorder")
-  top:append("reparent", "FloatTitle")
+  top:append(title_word, "FloatTitle")
   top:append(" ", "LazyIssuesBorder")
 
-  local list_h = math.min(#all_items + 2, 24)
+  local list_h = math.min(#items + 2, 24)
   local pop_w = 64
+  local list_row = math.floor((vim.o.lines - list_h - 3) / 2)
+  local list_col = math.floor((vim.o.columns - pop_w) / 2)
 
-  -- Single popup for the results list.
   local list_pop = Popup({
     enter = false,
     relative = "editor",
-    position = {
-      row = math.floor((vim.o.lines - list_h - 3) / 2),
-      col = math.floor((vim.o.columns - pop_w) / 2),
-    },
-    border = {
-      style = "rounded",
-      text = { top = top, top_align = "center" },
-      highlight = "LazyIssuesBorder",
-    },
+    position = { row = list_row, col = list_col },
+    border = { style = "rounded", text = { top = top, top_align = "center" }, highlight = "LazyIssuesBorder" },
     size = { width = pop_w, height = list_h },
     zindex = 60,
     buf_options = { modifiable = false, filetype = "lazyissues" },
@@ -1438,16 +1412,10 @@ local function change_parent_action(V)
   })
   list_pop:mount()
 
-  -- Input prompt positioned directly below the list, sharing the border.
-  local list_row = math.floor((vim.o.lines - list_h - 3) / 2)
-  local list_col = math.floor((vim.o.columns - pop_w) / 2)
   local input_pop = Popup({
     enter = true,
     relative = "editor",
-    position = {
-      row = list_row + list_h + 2,
-      col = list_col,
-    },
+    position = { row = list_row + list_h + 2, col = list_col },
     border = {
       style = { "╭", "─", "╮", "│", "╯", "─", "╰", "│" },
       text = { top = " > ", top_align = "left" },
@@ -1461,7 +1429,10 @@ local function change_parent_action(V)
   input_pop:mount()
 
   local sel_row = 1
-  local filtered = vim.deepcopy(all_items)
+  local filtered = {}
+  for _, it in ipairs(items) do
+    filtered[#filtered + 1] = it
+  end
 
   local function redraw_list()
     local lines = {}
@@ -1475,16 +1446,13 @@ local function change_parent_action(V)
     vim.api.nvim_buf_set_lines(list_pop.bufnr, 0, -1, false, lines)
     vim.bo[list_pop.bufnr].modifiable = false
     vim.api.nvim_buf_clear_namespace(list_pop.bufnr, ns, 0, -1)
-    -- Highlight selected row.
     if #filtered > 0 then
       local r = math.min(sel_row, #filtered)
       vim.api.nvim_buf_add_highlight(list_pop.bufnr, ns, "PmenuSel", r - 1, 0, -1)
     end
-    -- Highlight (root) entry differently when not selected.
-    if #filtered > 0 and filtered[1].node == nil and sel_row ~= 1 then
+    if #filtered > 0 and filtered[1].always and sel_row ~= 1 then
       vim.api.nvim_buf_add_highlight(list_pop.bufnr, ns, "LazyIssuesLabel", 0, 0, -1)
     end
-    -- Scroll list to keep selection visible.
     if list_pop.winid and vim.api.nvim_win_is_valid(list_pop.winid) then
       local r = math.min(sel_row, #filtered)
       local win_h = vim.api.nvim_win_get_height(list_pop.winid)
@@ -1503,14 +1471,10 @@ local function change_parent_action(V)
 
   local function filter(text)
     text = (text or ""):lower()
-    if text == "" then
-      filtered = vim.deepcopy(all_items)
-    else
-      filtered = {}
-      for _, item in ipairs(all_items) do
-        if item.node == nil or (item.title_lower and item.title_lower:find(text, 1, true)) then
-          filtered[#filtered + 1] = item
-        end
+    filtered = {}
+    for _, item in ipairs(items) do
+      if text == "" or item.always or (item.title_lower and item.title_lower:find(text, 1, true)) then
+        filtered[#filtered + 1] = item
       end
     end
     sel_row = 1
@@ -1518,15 +1482,91 @@ local function change_parent_action(V)
   end
 
   local function cleanup()
-    pcall(function() input_pop:unmount() end)
-    pcall(function() list_pop:unmount() end)
+    pcall(function()
+      input_pop:unmount()
+    end)
+    pcall(function()
+      list_pop:unmount()
+    end)
   end
 
   local function confirm()
-    local r = math.min(sel_row, #filtered)
-    local item = filtered[r]
+    local item = filtered[math.min(sel_row, #filtered)]
     vim.cmd("stopinsert")
     cleanup()
+    on_choose(item)
+  end
+
+  redraw_list()
+  vim.cmd("startinsert")
+
+  vim.api.nvim_create_autocmd({ "TextChangedI", "TextChanged" }, {
+    buffer = input_pop.bufnr,
+    callback = function()
+      filter(vim.api.nvim_buf_get_lines(input_pop.bufnr, 0, 1, false)[1] or "")
+    end,
+  })
+
+  local function map_input(lhs, fn)
+    vim.keymap.set({ "n", "i" }, lhs, fn, { buffer = input_pop.bufnr, nowait = true, silent = true })
+  end
+  map_input("<CR>", confirm)
+  map_input("<Esc>", function()
+    vim.cmd("stopinsert")
+    cleanup()
+    on_choose(nil)
+  end)
+  local function move(dir)
+    if #filtered == 0 then
+      return
+    end
+    sel_row = math.max(1, math.min(#filtered, sel_row + dir))
+    redraw_list()
+  end
+  map_input("<Down>", function()
+    move(1)
+  end)
+  map_input("<Up>", function()
+    move(-1)
+  end)
+  map_input("<C-j>", function()
+    move(1)
+  end)
+  map_input("<C-k>", function()
+    move(-1)
+  end)
+  map_input("<C-n>", function()
+    move(1)
+  end)
+  map_input("<C-p>", function()
+    move(-1)
+  end)
+end
+
+local function change_parent_action(V)
+  local node = selected_node(V)
+  if not node then
+    return
+  end
+  local prefix = node.path .. "/"
+
+  -- Build the full candidate list: (root) + all valid targets.
+  local items = { { label = "(root)", always = true, node = nil } }
+  local function collect(list)
+    for _, c in ipairs(list) do
+      local is_self = c.id == node.id
+      local is_desc = c.path:sub(1, #prefix) == prefix
+      if not is_self and not is_desc then
+        local indent = string.rep("  ", c.depth)
+        local title = (c.issue and c.issue.Title or c.id):sub(1, 50)
+        items[#items + 1] = { label = indent .. title, title_lower = title:lower(), node = c }
+      end
+      collect(c.children)
+    end
+  end
+  collect(V.model.issues)
+
+  fuzzy_pick("reparent", items, function(item)
     if not item then
       return
     end
@@ -1540,42 +1580,42 @@ local function change_parent_action(V)
       V.expanded[target.id] = true
     end
     reload_select(V, node.id)
-  end
-
-  redraw_list()
-  vim.cmd("startinsert")
-
-  vim.api.nvim_create_autocmd({ "TextChangedI", "TextChanged" }, {
-    buffer = input_pop.bufnr,
-    callback = function()
-      local text = vim.api.nvim_buf_get_lines(input_pop.bufnr, 0, 1, false)[1] or ""
-      filter(text)
-    end,
-  })
-
-  local ib = input_pop.bufnr
-  local function map_input(lhs, fn)
-    vim.keymap.set({ "n", "i" }, lhs, fn, { buffer = ib, nowait = true, silent = true })
-  end
-  map_input("<CR>", confirm)
-  map_input("<Esc>", function()
-    vim.cmd("stopinsert")
-    cleanup()
   end)
-  local function move(dir)
-    local max = #filtered
-    if max == 0 then return end
-    sel_row = sel_row + dir
-    if sel_row < 1 then sel_row = 1 end
-    if sel_row > max then sel_row = max end
-    redraw_list()
+end
+
+-- Fuzzy-jump to any issue across the whole tree, regardless of the current
+-- scope/filter. Selecting one switches to the All scope, expands ancestors and
+-- moves the cursor to it.
+local function jump_to_issue(V)
+  local items = {}
+  local function collect(list)
+    for _, c in ipairs(list) do
+      if c.issue then
+        local title = (c.issue.Title or "(untitled)"):sub(1, 50)
+        items[#items + 1] = { label = icons.glyph(c.issue.Status) .. " " .. title, title_lower = title:lower(), node = c }
+      end
+      collect(c.children)
+    end
   end
-  map_input("<Down>", function() move(1) end)
-  map_input("<Up>", function() move(-1) end)
-  map_input("<C-j>", function() move(1) end)
-  map_input("<C-k>", function() move(-1) end)
-  map_input("<C-n>", function() move(1) end)
-  map_input("<C-p>", function() move(-1) end)
+  collect(V.model.issues)
+  if #items == 0 then
+    return
+  end
+  fuzzy_pick("jump", items, function(item)
+    if not (item and item.node) then
+      return
+    end
+    V.scope = { kind = "all" }
+    V.search = ""
+    V.field_filter = nil
+    for _, n in ipairs(flatten(V.model)) do
+      if #n.children > 0 then
+        V.expanded[n.id] = true
+      end
+    end
+    reload_select(V, item.node.id)
+    focus(V, "issues")
+  end)
 end
 
 -- Discoverable edit menu: a popup listing every field (with current values) and
@@ -2252,6 +2292,9 @@ local function map_keys(V, bufnr, kind)
   end)
   map("f", function()
     field_filter_action(V)
+  end)
+  map("F", function()
+    jump_to_issue(V)
   end)
   map("r", function()
     reload(V)
