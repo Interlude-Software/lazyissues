@@ -34,6 +34,56 @@ local function short(id)
   return tostring(id):sub(1, 8)
 end
 
+-- Centered single-line input popup. Mirrors vim.ui.input's contract: on_accept
+-- receives the entered string on confirm, or nil on cancel.
+local function prompt_input(label, default, on_accept)
+  local pop = Popup({
+    enter = true,
+    border = {
+      style = "rounded",
+      highlight = "LazyIssuesBorder",
+      text = {
+        top = " " .. vim.trim(label) .. " ",
+        top_align = "center",
+        bottom = " Enter confirm · Esc cancel ",
+        bottom_align = "center",
+      },
+    },
+    position = "50%",
+    size = { width = "50%", height = 1 },
+    zindex = 60,
+    buf_options = { modifiable = true },
+    win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder" },
+  })
+  pop:mount()
+  default = tostring(default or "")
+  if default ~= "" then
+    vim.api.nvim_buf_set_lines(pop.bufnr, 0, -1, false, { default })
+  end
+  local finished = false
+  local function finish(accept)
+    if finished then
+      return
+    end
+    finished = true
+    local txt = accept and (vim.api.nvim_buf_get_lines(pop.bufnr, 0, 1, false)[1] or "") or nil
+    pcall(function()
+      pop:unmount()
+    end)
+    if on_accept then
+      on_accept(txt)
+    end
+  end
+  vim.keymap.set({ "n", "i" }, "<CR>", function()
+    finish(true)
+  end, { buffer = pop.bufnr })
+  vim.keymap.set({ "n", "i" }, "<Esc>", function()
+    finish(false)
+  end, { buffer = pop.bufnr })
+  pcall(vim.api.nvim_win_set_cursor, pop.winid, { 1, #default })
+  vim.cmd("startinsert!")
+end
+
 -- Word-wrap text (honoring embedded newlines) to `width` columns.
 local function wrap(text, width)
   width = math.max(10, width or 40)
@@ -637,15 +687,78 @@ local function toggle_expand(V)
   end
 end
 
+-- Live filter bar pinned across the bottom of the issues panel. Typing filters
+-- the list in real time (compute_rows already matches on V.search); <CR> keeps
+-- the filter and returns to the list, <Esc> restores the previous filter.
 local function do_search(V)
-  vim.ui.input({ prompt = "Search issues: ", default = V.search or "" }, function(input)
-    if input == nil then
+  local win = V.issues.winid
+  if not (win and vim.api.nvim_win_is_valid(win)) then
+    return
+  end
+  local pos = vim.api.nvim_win_get_position(win)
+  local w = vim.api.nvim_win_get_width(win)
+  local h = vim.api.nvim_win_get_height(win)
+  local prev_search = V.search or ""
+
+  local bar = Popup({
+    enter = true,
+    relative = "editor",
+    -- Dock flush across the bottom of the issues panel: content on the last
+    -- content row (Nui draws the border at ±1), full panel width so the bar's
+    -- side borders line up over the panel's own borders.
+    position = { row = pos[1] + math.max(0, h - 1), col = pos[2] },
+    size = { width = w, height = 1 },
+    border = {
+      style = "rounded",
+      text = { top = " / live filter ", top_align = "left" },
+      highlight = "LazyIssuesBorder",
+    },
+    zindex = 60,
+    buf_options = { modifiable = true, filetype = "" },
+    win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder" },
+  })
+  bar:mount()
+  if prev_search ~= "" then
+    vim.api.nvim_buf_set_lines(bar.bufnr, 0, -1, false, { prev_search })
+  end
+
+  local closed = false
+  local function dismiss(restore)
+    if closed then
       return
     end
-    V.search = input
-    refresh(V)
+    closed = true
+    if restore then
+      V.search = prev_search
+      refresh(V)
+    end
+    vim.cmd("stopinsert")
+    pcall(function()
+      bar:unmount()
+    end)
     focus(V, "issues")
+  end
+
+  vim.api.nvim_create_autocmd({ "TextChangedI", "TextChanged" }, {
+    buffer = bar.bufnr,
+    callback = function()
+      V.search = vim.api.nvim_buf_get_lines(bar.bufnr, 0, 1, false)[1] or ""
+      refresh(V)
+    end,
+  })
+
+  local function map(lhs, fn)
+    vim.keymap.set({ "n", "i" }, lhs, fn, { buffer = bar.bufnr, nowait = true, silent = true })
+  end
+  map("<CR>", function()
+    dismiss(false)
   end)
+  map("<Esc>", function()
+    dismiss(true)
+  end)
+
+  pcall(vim.api.nvim_win_set_cursor, bar.winid, { 1, #prev_search })
+  vim.cmd("startinsert!")
 end
 
 local function reload(V)
@@ -834,57 +947,6 @@ local function multiline_input(label, initial, on_accept, on_close)
       finish(false)
     end, { buffer = pop.bufnr })
   end
-end
-
--- Centered single-line input popup. Mirrors vim.ui.input's contract: on_accept
--- receives the entered string on confirm, or nil on cancel.
-local function prompt_input(label, default, on_accept)
-  local Popup = require("nui.popup")
-  local pop = Popup({
-    enter = true,
-    border = {
-      style = "rounded",
-      highlight = "LazyIssuesBorder",
-      text = {
-        top = " " .. vim.trim(label) .. " ",
-        top_align = "center",
-        bottom = " Enter confirm · Esc cancel ",
-        bottom_align = "center",
-      },
-    },
-    position = "50%",
-    size = { width = "50%", height = 1 },
-    zindex = 60,
-    buf_options = { modifiable = true },
-    win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder" },
-  })
-  pop:mount()
-  default = tostring(default or "")
-  if default ~= "" then
-    vim.api.nvim_buf_set_lines(pop.bufnr, 0, -1, false, { default })
-  end
-  local finished = false
-  local function finish(accept)
-    if finished then
-      return
-    end
-    finished = true
-    local txt = accept and (vim.api.nvim_buf_get_lines(pop.bufnr, 0, 1, false)[1] or "") or nil
-    pcall(function()
-      pop:unmount()
-    end)
-    if on_accept then
-      on_accept(txt)
-    end
-  end
-  vim.keymap.set({ "n", "i" }, "<CR>", function()
-    finish(true)
-  end, { buffer = pop.bufnr })
-  vim.keymap.set({ "n", "i" }, "<Esc>", function()
-    finish(false)
-  end, { buffer = pop.bufnr })
-  pcall(vim.api.nvim_win_set_cursor, pop.winid, { 1, #default })
-  vim.cmd("startinsert!")
 end
 
 local function edit_multiline(V, key, label, on_done)
