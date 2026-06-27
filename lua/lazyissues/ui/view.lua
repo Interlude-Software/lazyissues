@@ -357,8 +357,8 @@ end
 
 local function compute_rows(V)
   local model, scope, search = V.model, V.scope, V.search
-  -- Tree view for "all" with no search and no field filter; flat list otherwise.
-  if scope.kind == "all" and (not search or search == "") and not V.field_filter then
+  -- Tree view for "all" with no search/filter/sort; flat list otherwise.
+  if scope.kind == "all" and (not search or search == "") and not V.field_filter and not V.sort then
     return tree_rows(model, V.expanded)
   end
 
@@ -396,6 +396,36 @@ local function compute_rows(V)
       if ok then
         matched[#matched + 1] = n
       end
+    end
+  end
+  if V.sort then
+    local function rank(list, val)
+      for i, x in ipairs(list) do
+        if x == val then
+          return i
+        end
+      end
+      return math.huge
+    end
+    local cmp = {
+      Priority = function(a, b)
+        return rank(config.issue_priority, a.issue.Priority) > rank(config.issue_priority, b.issue.Priority)
+      end,
+      Status = function(a, b)
+        return rank(config.issue_status, a.issue.Status) < rank(config.issue_status, b.issue.Status)
+      end,
+      ["% complete"] = function(a, b)
+        return issue_percent(a) > issue_percent(b)
+      end,
+      Created = function(a, b)
+        return tostring(a.issue.CreatedAt or "") > tostring(b.issue.CreatedAt or "")
+      end,
+      Title = function(a, b)
+        return (a.issue.Title or ""):lower() < (b.issue.Title or ""):lower()
+      end,
+    }
+    if cmp[V.sort] then
+      table.sort(matched, cmp[V.sort])
     end
   end
   return flat_rows(matched)
@@ -1020,6 +1050,18 @@ local function field_filter_action(V)
       refresh(V)
       focus(V, "issues")
     end)
+  end)
+end
+
+-- Sort the issue list (switches to a flat view); "Default (tree)" restores the tree.
+local function sort_action(V)
+  prompt_select("Sort by:", { "Default (tree)", "Priority", "Status", "% complete", "Created", "Title" }, function(choice)
+    if not choice then
+      return
+    end
+    V.sort = (choice ~= "Default (tree)") and choice or nil
+    refresh(V)
+    focus(V, "issues")
   end)
 end
 
@@ -2378,6 +2420,9 @@ local function map_keys(V, bufnr, kind)
   end)
   map("F", function()
     jump_to_issue(V)
+  end)
+  map("gs", function()
+    sort_action(V)
   end)
   map("r", function()
     reload(V)
