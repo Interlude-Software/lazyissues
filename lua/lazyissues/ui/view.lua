@@ -1023,6 +1023,43 @@ local function field_filter_action(V)
   end)
 end
 
+-- Move the cursor to the next/prev issue edited on this branch (wraps around).
+local function jump_changed(V, dir)
+  if not (V.issues.winid and vim.api.nvim_win_is_valid(V.issues.winid)) then
+    return
+  end
+  local rows, n = V.rows, #V.rows
+  if n == 0 then
+    return
+  end
+  local cur = vim.api.nvim_win_get_cursor(V.issues.winid)[1]
+  for step = 1, n do
+    local i = ((cur - 1 + dir * step) % n) + 1
+    local r = rows[i]
+    if r and r.node and r.node._changed then
+      pcall(vim.api.nvim_win_set_cursor, V.issues.winid, { i, 0 })
+      render_detail(V, selected_node(V))
+      update_scrollbar(V.issues)
+      return
+    end
+  end
+  vim.notify("lazyissues: no branch-edited issues", vim.log.levels.INFO)
+end
+
+-- Expand or collapse every issue that has sub-issues.
+local function set_all_expanded(V, expand)
+  if not expand then
+    V.expanded = {}
+  else
+    for _, n in ipairs(flatten(V.model)) do
+      if #n.children > 0 then
+        V.expanded[n.id] = true
+      end
+    end
+  end
+  refresh(V, true)
+end
+
 local function reload(V)
   V.model = store.load(V.root)
   V.expanded = V.expanded or {}
@@ -2347,6 +2384,18 @@ local function map_keys(V, bufnr, kind)
     end)
     map("<Space>", function()
       toggle_expand(V)
+    end)
+    map("zR", function()
+      set_all_expanded(V, true)
+    end)
+    map("zM", function()
+      set_all_expanded(V, false)
+    end)
+    map("]c", function()
+      jump_changed(V, 1)
+    end)
+    map("[c", function()
+      jump_changed(V, -1)
     end)
     map("l", function()
       focus(V, "detail")
