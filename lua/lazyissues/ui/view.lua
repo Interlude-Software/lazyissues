@@ -1671,7 +1671,7 @@ local function selected_sprint(V)
 end
 
 local function create_sprint_action(V)
-  vim.ui.input({ prompt = "New sprint name: " }, function(name)
+  prompt_input("New sprint name", "", function(name)
     if name == nil or vim.trim(name) == "" then
       return
     end
@@ -1710,7 +1710,7 @@ local function sprint_edit_menu(V)
   }
   local dispatch = {
     name = function()
-      vim.ui.input({ prompt = "Sprint name: ", default = sp.Name or "" }, function(v)
+      prompt_input("Sprint name:", sp.Name or "", function(v)
         if v ~= nil and vim.trim(v) ~= "" then
           sp.Name = v
           save()
