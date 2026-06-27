@@ -1729,7 +1729,7 @@ local function sprint_edit_menu(V)
       end, reopen)
     end,
     status = function()
-      vim.ui.select(config.sprint_status, { prompt = "Sprint status:" }, function(v)
+      prompt_select("Sprint status:", config.sprint_status, function(v)
         if v then
           sp.Status = v
           save()
@@ -1738,7 +1738,7 @@ local function sprint_edit_menu(V)
       end)
     end,
     delete = function()
-      vim.ui.select({ "No", "Yes" }, { prompt = 'Delete sprint "' .. (sp.Name or "") .. '"?' }, function(c)
+      prompt_select('Delete sprint "' .. (sp.Name or "") .. '"?', { "No", "Yes" }, function(c)
         if c == "Yes" then
           local ok, err = actions.delete_sprint(sp._path)
           if not ok then
