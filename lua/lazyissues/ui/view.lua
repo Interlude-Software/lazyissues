@@ -1139,7 +1139,7 @@ local function comments_view(V, on_close)
     end
     local authors = config.comment_authors
     if authors and #authors > 0 then
-      vim.ui.select(authors, { prompt = "Author:" }, function(author)
+      prompt_select("Author:", authors, function(author)
         if author then
           ask_body(author)
         end
