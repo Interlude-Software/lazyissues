@@ -341,10 +341,24 @@ local function release_sprint_ids(model, release_id)
   return set
 end
 
+-- Free-text match across the most useful fields, not just the title.
+local function issue_matches(it, q)
+  local hay = { it.Title or "", tostring(it.Id or "") }
+  for _, k in ipairs({ "Assignee", "Reporter", "Description", "ReleaseNote" }) do
+    if type(it[k]) == "string" then
+      hay[#hay + 1] = it[k]
+    end
+  end
+  if type(it.Tags) == "table" then
+    hay[#hay + 1] = table.concat(it.Tags, " ")
+  end
+  return table.concat(hay, "\n"):lower():find(q:lower(), 1, true) ~= nil
+end
+
 local function compute_rows(V)
   local model, scope, search = V.model, V.scope, V.search
-  -- Tree view for "all" with no search; flat filtered list otherwise.
-  if scope.kind == "all" and (not search or search == "") then
+  -- Tree view for "all" with no search and no field filter; flat list otherwise.
+  if scope.kind == "all" and (not search or search == "") and not V.field_filter then
     return tree_rows(model, V.expanded)
   end
 
@@ -369,7 +383,15 @@ local function compute_rows(V)
         ok = V._rel_sprints[it.SprintId] == true
       end
       if ok and search and search ~= "" then
-        ok = (it.Title or ""):lower():find(search:lower(), 1, true) ~= nil
+        ok = issue_matches(it, search)
+      end
+      if ok and V.field_filter then
+        local ff = V.field_filter
+        if ff.field == "Tags" then
+          ok = type(it.Tags) == "table" and vim.tbl_contains(it.Tags, ff.value)
+        else
+          ok = tostring(it[ff.field] or "") == ff.value
+        end
       end
       if ok then
         matched[#matched + 1] = n
@@ -946,6 +968,59 @@ local function do_search(V)
 
   pcall(vim.api.nvim_win_set_cursor, bar.winid, { 1, #prev_search })
   vim.cmd("startinsert!")
+end
+
+-- Filter the issue list by a field value (Status/Priority/Assignee/Tag). The
+-- filter composes with the scope and the live search; pick "Clear filter" to drop it.
+local function field_filter_action(V)
+  local fields = { "Status", "Priority", "Assignee", "Tag" }
+  if V.field_filter then
+    fields[#fields + 1] = "Clear filter"
+  end
+  prompt_select("Filter by:", fields, function(field)
+    if not field then
+      return
+    end
+    if field == "Clear filter" then
+      V.field_filter = nil
+      refresh(V)
+      return
+    end
+    local values
+    if field == "Status" then
+      values = config.issue_status
+    elseif field == "Priority" then
+      values = config.issue_priority
+    elseif field == "Assignee" then
+      values = config.assignees
+    else -- Tag: distinct tags across all issues
+      local seen = {}
+      values = {}
+      for _, n in ipairs(flatten(V.model)) do
+        local it = n.issue
+        if it and type(it.Tags) == "table" then
+          for _, tg in ipairs(it.Tags) do
+            if not seen[tg] then
+              seen[tg] = true
+              values[#values + 1] = tg
+            end
+          end
+        end
+      end
+    end
+    if not values or #values == 0 then
+      vim.notify("lazyissues: no values to filter by", vim.log.levels.INFO)
+      return
+    end
+    prompt_select(field .. " =", values, function(val)
+      if not val then
+        return
+      end
+      V.field_filter = { field = field == "Tag" and "Tags" or field, value = val }
+      refresh(V)
+      focus(V, "issues")
+    end)
+  end)
 end
 
 local function reload(V)
@@ -2174,6 +2249,9 @@ local function map_keys(V, bufnr, kind)
   end)
   map("/", function()
     do_search(V)
+  end)
+  map("f", function()
+    field_filter_action(V)
   end)
   map("r", function()
     reload(V)
