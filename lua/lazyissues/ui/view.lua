@@ -576,13 +576,51 @@ local function render_detail(V, node)
       add("    " .. dl)
     end
   end
-  add("  " .. string.rep("─", width))
-  local footer_parts = {}
+  -- Comments list (table-style section), if the schema has comments.
   if has_comments then
-    footer_parts[#footer_parts + 1] = string.format("Comments (%d)", (it.Comments and #it.Comments) or 0)
+    local comments = (it.Comments and it.Comments ~= vim.NIL) and it.Comments or {}
+    add("  " .. string.rep("─", width))
+    add(string.format("  Comments (%d)", #comments), "LazyIssuesLabel")
+    if #comments == 0 then
+      add("    —")
+    else
+      for _, c in ipairs(comments) do
+        local author = (c.Author and c.Author ~= vim.NIL and c.Author ~= "") and tostring(c.Author) or "—"
+        local date = tostring(c.CreatedAt or ""):sub(1, 10)
+        local li = add(string.format("  %s · %s", author, date))
+        hls[#hls + 1] = { "LazyIssuesLabel", li, 2, 2 + #author }
+        for _, bl in ipairs(wrap(tostring(c.Body or ""), width - 4)) do
+          add("      " .. bl)
+        end
+      end
+    end
   end
-  footer_parts[#footer_parts + 1] = string.format("Children (%d)", #node.children)
-  add("  " .. table.concat(footer_parts, "   "))
+
+  -- Children list (table-style section), with the tree's status glyph/colour.
+  add("  " .. string.rep("─", width))
+  add(string.format("  Children (%d)", #node.children), "LazyIssuesLabel")
+  if #node.children == 0 then
+    add("    —")
+  else
+    for _, child in ipairs(node.children) do
+      local ci = child.issue or {}
+      local glyph = icons.glyph(ci.Status)
+      local suffix = ""
+      if #child.children > 0 then
+        suffix = string.format("  %d%%", math.floor(issue_percent(child) * 100 + 0.5))
+      end
+      local title = tostring(ci.Title or "(untitled)")
+      local avail = width - 4 - #suffix
+      if avail > 1 and #title > avail then
+        title = title:sub(1, avail - 1) .. "…"
+      end
+      local li = add(string.format("  %s %s%s", glyph, title, suffix))
+      local ghl = icons.status_hl[ci.Status]
+      if ghl then
+        hls[#hls + 1] = { ghl, li, 2, 2 + #glyph }
+      end
+    end
+  end
 
   set_lines(bufnr, lines)
   for _, h in ipairs(hls) do
@@ -977,21 +1015,22 @@ local function comments_view(V, on_close)
   local it = node.issue or {}
 
   local top = NuiLine()
-  top:append(" lazyissues ", "FloatBorder")
+  top:append(" lazyissues ", "LazyIssuesBorder")
   top:append("comments", "FloatTitle")
-  top:append(" ", "FloatBorder")
+  top:append(" ", "LazyIssuesBorder")
   local bottom = NuiLine()
-  bottom:append(" a add · d delete · q close ", "FloatBorder")
+  bottom:append(" a add · d delete · q close ", "LazyIssuesBorder")
 
-  local Popup = require("nui.popup")
   local pop = Popup({
     enter = true,
     border = {
       style = "rounded",
+      highlight = "LazyIssuesBorder",
       text = { top = top, top_align = "center", bottom = bottom, bottom_align = "center" },
     },
     position = "50%",
     size = { width = "60%", height = "60%" },
+    zindex = 60,
     buf_options = { modifiable = false, filetype = "lazyissues-comments" },
     win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder", cursorline = true, wrap = true },
   })
@@ -1033,12 +1072,8 @@ local function comments_view(V, on_close)
   end
 
   local function add_comment()
-    vim.ui.select(config.comment_authors, { prompt = "Author:" }, function(author)
-      if not author then
-        return
-      end
-      -- Body entered in the bottom-bar prompt (no popup).
-      vim.ui.input({ prompt = "Comment (" .. author .. "): " }, function(body)
+    local function ask_body(author)
+      prompt_input("Comment (" .. author .. ")", "", function(body)
         if body == nil or vim.trim(body) == "" then
           return
         end
@@ -1048,8 +1083,25 @@ local function comments_view(V, on_close)
           return
         end
         redraw()
+      end, { multiline = true })
+    end
+    local authors = config.comment_authors
+    if authors and #authors > 0 then
+      vim.ui.select(authors, { prompt = "Author:" }, function(author)
+        if author then
+          ask_body(author)
+        end
       end)
-    end)
+    else
+      -- No configured authors: ask for one, defaulting to the git/user name.
+      local default = gitmod.user_name(V.root) or vim.env.USER or ""
+      prompt_input("Comment author", default, function(author)
+        author = author and vim.trim(author) or ""
+        if author ~= "" then
+          ask_body(author)
+        end
+      end)
+    end
   end
   local function del_comment()
     local row = vim.api.nvim_win_get_cursor(pop.winid)[1]
