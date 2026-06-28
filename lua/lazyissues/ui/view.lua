@@ -2072,8 +2072,10 @@ local function edit_menu(V)
   local menu = Menu({
     position = "50%",
     size = { width = 48, height = #lines },
+    zindex = 60,
     border = {
       style = "rounded",
+      highlight = "LazyIssuesBorder",
       text = { top = " Edit issue ", top_align = "center", bottom = " ↵ select · q close ", bottom_align = "center" },
     },
     win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder,CursorLine:PmenuSel" },
@@ -2195,8 +2197,10 @@ local function sprint_edit_menu(V)
   local menu = Menu({
     position = "50%",
     size = { width = 46, height = #lines },
+    zindex = 60,
     border = {
       style = "rounded",
+      highlight = "LazyIssuesBorder",
       text = { top = " Edit sprint ", top_align = "center", bottom = " ↵ select · q close ", bottom_align = "center" },
     },
     win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder,CursorLine:PmenuSel" },
@@ -2588,8 +2592,10 @@ local function release_edit_menu(V)
   local menu = Menu({
     position = "50%",
     size = { width = 46, height = #lines },
+    zindex = 60,
     border = {
       style = "rounded",
+      highlight = "LazyIssuesBorder",
       text = { top = " Edit release ", top_align = "center", bottom = " ↵ select · q close ", bottom_align = "center" },
     },
     win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder,CursorLine:PmenuSel" },
@@ -3431,14 +3437,13 @@ function M.offer_init()
   }
 
   local top = NuiLine()
-  top:append(" lazyissues ", "FloatBorder")
+  top:append(" lazyissues ", "LazyIssuesBorder")
   top:append("setup", "FloatTitle")
-  top:append(" ", "FloatBorder")
+  top:append(" ", "LazyIssuesBorder")
 
-  local Popup = require("nui.popup")
   local pop = Popup({
     enter = true,
-    border = { style = "rounded", text = { top = top, top_align = "center" } },
+    border = { style = "rounded", highlight = "LazyIssuesBorder", text = { top = top, top_align = "center" } },
     position = "50%",
     size = { width = math.max(56, #repo + 16), height = #lines },
     buf_options = { modifiable = false, filetype = "lazyissues-intro" },
