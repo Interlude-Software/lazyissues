@@ -84,6 +84,7 @@ choose which fields your issues should have.
 | `/` | live filter (title, id, assignee, tags, description) |
 | `f` / `F` | filter by field value / fuzzy-jump to any issue |
 | `gs` / `gS` | sort issues / sprint stats |
+| `B` | **kanban board** (columns by status; `<` `>` move cards) |
 | `]c` / `[c` | next / prev issue edited on this branch |
 | `r` reload · `?` help · `q` quit · `E` | **edit template** |
 | **Issues:** `e` | **edit menu** (all fields + actions) |
