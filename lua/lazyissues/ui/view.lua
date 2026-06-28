@@ -1868,6 +1868,37 @@ local function open_raw(V)
   vim.cmd("tabedit " .. vim.fn.fnameescape(file))
 end
 
+-- Reveal the selected issue's folder in the OS file manager (Finder / Explorer
+-- / the default xdg handler), depending on platform.
+local function reveal_in_file_manager(V)
+  local node = selected_node(V)
+  if not node then
+    return
+  end
+  local dir = node.path
+  if vim.fn.isdirectory(dir) == 0 then
+    vim.notify("lazyissues: no folder at " .. dir, vim.log.levels.ERROR)
+    return
+  end
+  local cmd
+  if vim.fn.has("mac") == 1 then
+    cmd = { "open", dir }
+  elseif vim.fn.has("win32") == 1 or vim.fn.has("win64") == 1 then
+    cmd = { "explorer", dir }
+  else
+    cmd = { "xdg-open", dir }
+  end
+  local res = vim.system(cmd, { text = true }):wait()
+  -- Windows `explorer` returns a non-zero exit code even on success, so only
+  -- surface an error for the POSIX openers.
+  if res.code ~= 0 and cmd[1] ~= "explorer" then
+    vim.notify(
+      "lazyissues: could not open file manager (" .. (res.stderr or "exit " .. res.code) .. ")",
+      vim.log.levels.ERROR
+    )
+  end
+end
+
 -- Discoverable edit menu: a popup listing every field (with current values) and
 -- the structural actions. Picking one dispatches to the matching action.
 local function edit_menu(V)
@@ -2953,6 +2984,9 @@ local function map_keys(V, bufnr, kind)
     map("gf", function()
       open_raw(V)
     end)
+    map("gx", function()
+      reveal_in_file_manager(V)
+    end)
     map("p", function()
       picker(V, "Priority", config.issue_priority, "Priority:")
     end)
@@ -3039,7 +3073,8 @@ function M.help()
     "  Edit selected issue",
     "    e edit menu   c comments   o new   O child   D delete   P re-parent",
     "    quick:  s status  S cycle  p priority  t type  a assignee  m sprint",
-    "    T tags   d desc   n note-type   N note   K preview   y yank id   gf raw",
+    "    T tags   d desc   n note-type   N note   K preview   y yank id",
+    "    gf raw json   gx reveal issue folder in OS file manager",
     "",
     "  Multi-select",
     "    x mark   X clear   b bulk (set status / priority / sprint, or delete)",
