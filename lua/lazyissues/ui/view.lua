@@ -2611,6 +2611,206 @@ local function release_edit_menu(V)
   menu:mount()
 end
 
+-- Kanban board: a full-screen popup with one column per status. Cards are all
+-- issues (flattened) bucketed by Status. h/l/j/k navigate, < > move the selected
+-- card between status columns (persisted), <CR> jumps to it in the main view.
+local function kanban_board(V)
+  local statuses = config.issue_status
+  local ncols = #statuses
+  if ncols == 0 then
+    return
+  end
+  local width = math.min(vim.o.columns - 6, 40 + ncols * 24)
+  local height = math.min(vim.o.lines - 6, 40)
+  local col_w = math.max(10, math.floor((width - ncols) / ncols))
+
+  local top = NuiLine()
+  top:append(" lazyissues ", "LazyIssuesBorder")
+  top:append("board", "FloatTitle")
+  top:append(" ", "LazyIssuesBorder")
+  local bottom = NuiLine()
+  bottom:append(" h/l/j/k move · < > change status · <CR> open · q close ", "LazyIssuesBorder")
+
+  local pop = Popup({
+    enter = true,
+    border = {
+      style = "rounded",
+      highlight = "LazyIssuesBorder",
+      text = { top = top, top_align = "center", bottom = bottom, bottom_align = "center" },
+    },
+    position = "50%",
+    size = { width = width, height = height },
+    zindex = 60,
+    buf_options = { modifiable = false, filetype = "lazyissues-board" },
+    win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder", wrap = false },
+  })
+  pop:mount()
+
+  local sel_col, sel_row = 1, 1
+  local cols = {}
+
+  -- Fit a string to exactly `w` display columns (truncate with … / pad spaces).
+  local function fit(s, w)
+    s = tostring(s):gsub("[\r\n]+", " ")
+    if vim.fn.strdisplaywidth(s) > w then
+      s = vim.fn.strcharpart(s, 0, w - 1) .. "…"
+    end
+    local padn = w - vim.fn.strdisplaywidth(s)
+    if padn > 0 then
+      s = s .. string.rep(" ", padn)
+    end
+    return s
+  end
+
+  local function rebuild()
+    local by = {}
+    for _, st in ipairs(statuses) do
+      by[st] = {}
+    end
+    for _, n in ipairs(flatten(V.model)) do
+      local it = n.issue
+      if it and by[it.Status] then
+        table.insert(by[it.Status], n)
+      end
+    end
+    cols = {}
+    for _, st in ipairs(statuses) do
+      cols[#cols + 1] = { status = st, nodes = by[st] }
+    end
+    sel_col = math.max(1, math.min(ncols, sel_col))
+    sel_row = math.max(1, math.min(math.max(1, #cols[sel_col].nodes), sel_row))
+  end
+
+  local function redraw()
+    rebuild()
+    local lines = {}
+    local header, divider = "", ""
+    for _, c in ipairs(cols) do
+      header = header .. fit("  " .. c.status .. " (" .. #c.nodes .. ")", col_w) .. " "
+      divider = divider .. fit("  " .. string.rep("─", col_w - 2), col_w) .. " "
+    end
+    lines[#lines + 1] = header
+    lines[#lines + 1] = divider
+    local maxn = 0
+    for _, c in ipairs(cols) do
+      maxn = math.max(maxn, #c.nodes)
+    end
+    for r = 1, maxn do
+      local line = ""
+      for ci, c in ipairs(cols) do
+        local node = c.nodes[r]
+        if node then
+          local marker = (ci == sel_col and r == sel_row) and "▸ " or "  "
+          line = line .. fit(marker .. (node.issue.Title or "(untitled)"), col_w) .. " "
+        else
+          line = line .. string.rep(" ", col_w) .. " "
+        end
+      end
+      lines[#lines + 1] = line
+    end
+    vim.bo[pop.bufnr].modifiable = true
+    vim.api.nvim_buf_set_lines(pop.bufnr, 0, -1, false, lines)
+    vim.bo[pop.bufnr].modifiable = false
+    vim.api.nvim_buf_clear_namespace(pop.bufnr, ns, 0, -1)
+    vim.api.nvim_buf_add_highlight(pop.bufnr, ns, "LazyIssuesHeader", 0, 0, -1)
+  end
+
+  redraw()
+
+  local function cur_node()
+    return cols[sel_col] and cols[sel_col].nodes[sel_row]
+  end
+  local function move_col(d)
+    sel_col = math.max(1, math.min(ncols, sel_col + d))
+    sel_row = math.max(1, math.min(math.max(1, #cols[sel_col].nodes), sel_row))
+    redraw()
+  end
+  local function move_row(d)
+    if #cols[sel_col].nodes == 0 then
+      return
+    end
+    sel_row = math.max(1, math.min(#cols[sel_col].nodes, sel_row + d))
+    redraw()
+  end
+  local function change_status(d)
+    local node = cur_node()
+    if not node then
+      return
+    end
+    local target = math.max(1, math.min(ncols, sel_col + d))
+    if target == sel_col then
+      return
+    end
+    apply_field(V, node, "Status", statuses[target])
+    sel_col = target
+    rebuild()
+    for i, nn in ipairs(cols[sel_col].nodes) do
+      if nn.id == node.id then
+        sel_row = i
+        break
+      end
+    end
+    redraw()
+  end
+
+  local function map(lhs, fn)
+    vim.keymap.set("n", lhs, fn, { buffer = pop.bufnr, nowait = true, silent = true })
+  end
+  map("l", function()
+    move_col(1)
+  end)
+  map("h", function()
+    move_col(-1)
+  end)
+  map("<Right>", function()
+    move_col(1)
+  end)
+  map("<Left>", function()
+    move_col(-1)
+  end)
+  map("j", function()
+    move_row(1)
+  end)
+  map("k", function()
+    move_row(-1)
+  end)
+  map("<Down>", function()
+    move_row(1)
+  end)
+  map("<Up>", function()
+    move_row(-1)
+  end)
+  map(">", function()
+    change_status(1)
+  end)
+  map("<", function()
+    change_status(-1)
+  end)
+  map("<CR>", function()
+    local node = cur_node()
+    pcall(function()
+      pop:unmount()
+    end)
+    if node then
+      V.scope = { kind = "all" }
+      for _, n in ipairs(flatten(V.model)) do
+        if #n.children > 0 then
+          V.expanded[n.id] = true
+        end
+      end
+      reload_select(V, node.id)
+      focus(V, "issues")
+    end
+  end)
+  for _, k in ipairs({ "q", "<Esc>" }) do
+    map(k, function()
+      pcall(function()
+        pop:unmount()
+      end)
+    end)
+  end
+end
+
 -- Forward declaration (defined after the template picker section).
 local edit_template_flow
 
@@ -2660,6 +2860,9 @@ local function map_keys(V, bufnr, kind)
   end)
   map("gS", function()
     sprint_stats(V)
+  end)
+  map("B", function()
+    kanban_board(V)
   end)
   map("r", function()
     reload(V)
@@ -2824,6 +3027,7 @@ function M.help()
     "    <Space>       expand/collapse   zR / zM    expand / collapse all",
     "    l / h         detail / scopes   ]c / [c    next/prev branch-edit",
     "    / search      f filter          F jump     gs sort    gS stats",
+    "    B              kanban board (columns by status, < > move cards)",
     "    r reload      E edit template   ? / q / <Esc>  help / close",
     "",
     "  Edit selected issue",
@@ -3375,11 +3579,11 @@ function M.open()
 
   -- Context-sensitive footer: shortcut hints for the focused panel.
   local FOOTER_HINTS = {
-    scopes = "  ⏎ select scope     Tab / 1-5 panels     ? help     q quit",
-    sprints = "  ⏎ filter   ␣ expand   o new   e edit   Tab panels   ? help",
-    releases = "  ⏎ filter   o new   e edit   Tab panels   ? help",
-    issues = "  e edit   c comments   o new   O child   D del   P re-parent   / find   ? help",
-    detail = "  Tab / 1-5 panels     ? help     q quit",
+    scopes = "  ⏎ select scope     B board     Tab / 1-5 panels     ? help     q quit",
+    sprints = "  ⏎ filter   ␣ expand   o new   e edit   B board   Tab panels   ? help",
+    releases = "  ⏎ filter   o new   e edit   B board   Tab panels   ? help",
+    issues = "  e edit   c comments   o new   O child   D del   P re-parent   / find   B board   ? help",
+    detail = "  B board     Tab / 1-5 panels     ? help     q quit",
   }
   local function current_panel()
     local w = vim.api.nvim_get_current_win()
