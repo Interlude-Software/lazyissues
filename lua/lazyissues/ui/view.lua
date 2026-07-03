@@ -736,13 +736,25 @@ local function render_detail(V, node)
   local tmpl = V.model.template
   -- Fields that have special rendering and are not shown inline.
   local special = { Title = true, Description = true, Comments = true }
+  -- Friendly short labels for fields whose PascalCase names are too long.
+  local friendly = {
+    SprintId = "Sprint",
+    ReleaseNoteType = "Rel. note",
+  }
+  -- Combined release-note display: show note text if Public, else "(none)".
+  local release_note_display = (it.ReleaseNoteType == "Public" and it.ReleaseNote ~= "" and it.ReleaseNote ~= vim.NIL)
+      and val(it.ReleaseNote)
+    or "(none)"
   if tmpl then
     for _, f in ipairs(tmpl.fields) do
-      if not special[f.name] then
+      -- ReleaseNote is folded into the ReleaseNoteType row; skip it.
+      if not special[f.name] and f.name ~= "ReleaseNote" then
         local v = it[f.name]
         local display
         if f.name == "SprintId" then
           display = sprint_name(V.model, v)
+        elseif f.name == "ReleaseNoteType" then
+          display = release_note_display
         elseif f.type == "list" and type(v) == "table" and #v > 0 then
           display = table.concat(v, ", ")
         else
@@ -754,7 +766,7 @@ local function render_detail(V, node)
         elseif f.name == "Priority" then
           valgroup = icons.priority_hl[v]
         end
-        field(f.name, display, valgroup)
+        field(friendly[f.name] or f.name, display, valgroup)
       end
     end
   else
@@ -764,8 +776,7 @@ local function render_detail(V, node)
     field("Reporter", val(it.Reporter))
     field("Sprint", sprint_name(V.model, it.SprintId))
     field("Tags", (it.Tags and #it.Tags > 0) and table.concat(it.Tags, ", ") or "—")
-    field("Rel. note type", val(it.ReleaseNoteType))
-    field("Rel. note", val(it.ReleaseNote))
+    field("Rel. note", release_note_display)
   end
   field("Created", val(tostring(it.CreatedAt)):sub(1, 19))
 
