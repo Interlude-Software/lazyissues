@@ -764,7 +764,8 @@ local function render_detail(V, node)
     field("Reporter", val(it.Reporter))
     field("Sprint", sprint_name(V.model, it.SprintId))
     field("Tags", (it.Tags and #it.Tags > 0) and table.concat(it.Tags, ", ") or "—")
-    field("Rel. note", val(it.ReleaseNoteType))
+    field("Rel. note type", val(it.ReleaseNoteType))
+    field("Rel. note", val(it.ReleaseNote))
   end
   field("Created", val(tostring(it.CreatedAt)):sub(1, 19))
 
