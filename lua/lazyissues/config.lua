@@ -8,7 +8,7 @@ M.issue_type = { "Bug", "Feature", "Task", "Improvement" }
 M.issue_status = { "Open", "InProgress", "Resolved", "Closed" }
 M.issue_priority = { "Low", "Medium", "High", "Critical" }
 M.sprint_status = { "Planned", "Active", "Completed", "Archived" }
-M.release_status = { "InDevelopment", "InProgress", "ReadyToPublish", "Published", "Error" }
+M.release_status = { "InDevelopment", "InProgress", "Published", "Error" }
 M.release_note_type = { "None", "Public" }
 
 -- Fixed pick-lists from the frontend.
