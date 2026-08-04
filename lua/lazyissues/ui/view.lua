@@ -36,11 +36,18 @@ end
 
 -- Centered input popup. Single-line by default (Enter confirms); pass
 -- opts.multiline for a taller, wrapping editor (Ctrl-s saves, Esc cancels).
--- opts.width / opts.height override the size. Mirrors vim.ui.input's contract:
--- on_accept gets the text on confirm, nil on cancel.
+-- opts.width / opts.height override the size. opts.again_key adds a second
+-- confirm key (labelled opts.again_hint) for "confirm and keep going". Mirrors
+-- vim.ui.input's contract: on_accept gets the text on confirm, nil on cancel,
+-- plus a second arg that is true when confirmed via opts.again_key.
 local function prompt_input(label, default, on_accept, opts)
   opts = opts or {}
   local multiline = opts.multiline
+  local hints = { multiline and "Ctrl-s save" or "Enter confirm" }
+  if opts.again_key then
+    hints[#hints + 1] = opts.again_hint or "again"
+  end
+  hints[#hints + 1] = "Esc cancel"
   local pop = Popup({
     enter = true,
     border = {
@@ -49,7 +56,7 @@ local function prompt_input(label, default, on_accept, opts)
       text = {
         top = " " .. vim.trim(label) .. " ",
         top_align = "center",
-        bottom = multiline and " Ctrl-s save · Esc cancel " or " Enter confirm · Esc cancel ",
+        bottom = " " .. table.concat(hints, " · ") .. " ",
         bottom_align = "center",
       },
     },
@@ -65,7 +72,7 @@ local function prompt_input(label, default, on_accept, opts)
   pop:mount()
   vim.api.nvim_buf_set_lines(pop.bufnr, 0, -1, false, vim.split(tostring(default or ""), "\n", { plain = true }))
   local finished = false
-  local function finish(accept)
+  local function finish(accept, again)
     if finished then
       return
     end
@@ -79,7 +86,7 @@ local function prompt_input(label, default, on_accept, opts)
       pop:unmount()
     end)
     if on_accept then
-      on_accept(txt)
+      on_accept(txt, again)
     end
   end
   if multiline then
@@ -98,6 +105,11 @@ local function prompt_input(label, default, on_accept, opts)
     end, { buffer = pop.bufnr })
     vim.keymap.set({ "n", "i" }, "<Esc>", function()
       finish(false)
+    end, { buffer = pop.bufnr })
+  end
+  if opts.again_key then
+    vim.keymap.set({ "n", "i" }, opts.again_key, function()
+      finish(true, true)
     end, { buffer = pop.bufnr })
   end
   -- Cursor at the end of the prefilled content.
@@ -548,7 +560,7 @@ local function render_scopes(V)
 end
 
 local function render_sprints(V)
-  local lines, meta, actives = {}, {}, {}
+  local lines, meta, actives, closed = {}, {}, {}, {}
   local sel = V.scope.kind == "sprint" and V.scope or nil
   for _, sp in ipairs(V.model.sprints) do
     local c = V.counts.by_sprint[sp.Id] or { all = 0, open = 0, closed = 0 }
@@ -560,6 +572,9 @@ local function render_sprints(V)
     lines[#lines + 1] = string.format("%s%s (%d)", marker, sp.Name, c.all)
     meta[#meta + 1] = { kind = "sprint", id = sp.Id }
     actives[#lines] = header_active or nil
+    if sp.Status == "Completed" or sp.Status == "Archived" then
+      closed[#lines] = #marker
+    end
     if expanded then
       local cats = {
         { status = "all", label = "All", n = c.all },
@@ -583,21 +598,31 @@ local function render_sprints(V)
   for line_no in pairs(actives) do
     hl(V.sprints.bufnr, "LazyIssuesActive", line_no - 1)
   end
+  for line_no, prefix_len in pairs(closed) do
+    hl(V.sprints.bufnr, "LazyIssuesClosed", line_no - 1, prefix_len, -1)
+  end
   V.sprints._meta = meta
 end
 
 local function render_releases(V)
-  local lines, meta = {}, {}
+  local lines, meta, closed = {}, {}, {}
   for _, rel in ipairs(V.model.releases) do
     local active = V.scope.kind == "release" and V.scope.id == rel.Id
     local mark = active and "› " or "  "
     lines[#lines + 1] = string.format("%s%s", mark, rel.Name)
     meta[#meta + 1] = { id = rel.Id, active = active }
+    if rel.Status == "Published" then
+      closed[#lines] = #mark
+    end
   end
   if #lines == 0 then
     lines = { "  (no releases)" }
   end
   set_lines(V.releases.bufnr, lines)
+  vim.api.nvim_buf_clear_namespace(V.releases.bufnr, ns, 0, -1)
+  for line_no, prefix_len in pairs(closed) do
+    hl(V.releases.bufnr, "LazyIssuesClosed", line_no - 1, prefix_len, -1)
+  end
   V.releases._meta = meta
 end
 
@@ -1541,9 +1566,11 @@ local function comments_view(V, on_close)
   redraw()
 end
 
+-- Create an issue from a title prompt. Ctrl-a confirms and reopens the prompt so
+-- several issues (or several children of the same parent) can be added in a row.
 local function create_issue_action(V, parent_node)
   local label = parent_node and "New child issue title" or "New issue title"
-  prompt_input(label, nil, function(title)
+  prompt_input(label, nil, function(title, again)
     if title == nil or vim.trim(title) == "" then
       return
     end
@@ -1560,7 +1587,13 @@ local function create_issue_action(V, parent_node)
       V.expanded[parent_node.id] = true
     end
     reload_select(V, id)
-  end)
+    if again then
+      -- parent_node is stale after the reload, but only its path/id are used.
+      vim.schedule(function()
+        create_issue_action(V, parent_node)
+      end)
+    end
+  end, { again_key = "<C-a>", again_hint = "Ctrl-a confirm + another" })
 end
 
 local function delete_action(V)
@@ -2443,9 +2476,9 @@ local function release_notes_preview(V, rel, on_close)
       any = true
       add("  " .. grp[2], "LazyIssuesHeader")
       for _, x in ipairs(items) do
-        add("    • " .. x.title .. (x.open and "  (open)" or ""), x.open and "LazyIssuesInProgress" or nil)
-        for _, nl in ipairs(vim.split(x.note, "\n", { plain = true })) do
-          add("        " .. nl, "LazyIssuesDim")
+        local note_lines = vim.split(x.note, "\n", { plain = true })
+        for i, nl in ipairs(note_lines) do
+          add("    " .. (i == 1 and "• " or "  ") .. nl, x.open and "LazyIssuesInProgress" or nil)
         end
       end
       add("")
@@ -3074,6 +3107,7 @@ function M.help()
     "",
     "  Edit selected issue",
     "    e edit menu   c comments   o new   O child   D delete   P re-parent",
+    "    in the o / O title prompt:  Ctrl-a confirms and creates another",
     "    quick:  s status  S cycle  p priority  t type  a assignee  m sprint",
     "    T tags   d desc   n note-type   N note   K preview   y yank id",
     "    gf raw json   gx reveal issue folder in OS file manager",

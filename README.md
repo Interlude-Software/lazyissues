@@ -89,7 +89,7 @@ choose which fields your issues should have.
 | `r` reload · `?` help · `q` quit · `E` | **edit template** |
 | **Issues:** `e` | **edit menu** (all fields + actions) |
 | `c` | comments (add/delete) · `K` preview description |
-| `o` / `O` | new issue / new child issue |
+| `o` / `O` | new issue / new child issue (in the title prompt, `Ctrl-a` confirms and creates another) |
 | `D` / `P` | delete / re-parent (with filterable picker) |
 | `x` / `X` / `b` | mark / clear marks / bulk action on marked |
 | `y` / `gf` | yank issue id / open raw `issue.json` |
