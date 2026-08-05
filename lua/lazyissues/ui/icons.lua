@@ -61,6 +61,8 @@ function M.setup()
     LazyIssuesScrollTrack = { fg = "#3a3a3a" },
     -- Multi-select mark in the issues gutter.
     LazyIssuesMarked = { fg = "#7aa2f7", bold = true },
+    -- Favourite star marker.
+    LazyIssuesFavourite = { fg = "#f6c744", bold = true },
   }
   for name, spec in pairs(hl) do
     spec.default = true
