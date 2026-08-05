@@ -350,22 +350,48 @@ end
 
 -- ── scope → visible rows ────────────────────────────────────────────────────
 
--- A row = { node, depth, has_children, expanded }.
-local function tree_rows(model, expanded)
-  local rows = {}
-  local function rec(n)
+local function is_fav(it)
+  return it ~= nil and it.IsFavourite == true
+end
+
+-- A row = { node, depth, has_children, expanded }. Appends rows for `nodes`
+-- and (if expanded) their descendants, at `depth` and below.
+local function subtree_rows(nodes, depth, expanded, out)
+  for _, n in ipairs(nodes) do
     local has = #n.children > 0
-    rows[#rows + 1] = { node = n, depth = n.depth, has_children = has, expanded = expanded[n.id] }
+    out[#out + 1] = { node = n, depth = depth, has_children = has, expanded = expanded[n.id] }
     if has and expanded[n.id] then
-      for _, c in ipairs(n.children) do
-        rec(c)
+      subtree_rows(n.children, depth + 1, expanded, out)
+    end
+  end
+end
+
+-- Tree rows for scope "all" with no search/filter/sort, with favourited
+-- subtrees (a favourited node plus all its descendants) pulled out of their
+-- normal position so they can be pinned to the top of the pane instead.
+-- Returns fav_rows (each favourited node rendered as its own mini-tree,
+-- rooted at depth 0) and rest_rows (everything else, in its normal tree shape).
+local function tree_rows_split(model, expanded)
+  local fav_roots, rest = {}, {}
+  local function walk(nodes, depth)
+    for _, n in ipairs(nodes) do
+      if is_fav(n.issue) then
+        fav_roots[#fav_roots + 1] = n
+      else
+        local has = #n.children > 0
+        rest[#rest + 1] = { node = n, depth = depth, has_children = has, expanded = expanded[n.id] }
+        if has and expanded[n.id] then
+          walk(n.children, depth + 1)
+        end
       end
     end
   end
-  for _, n in ipairs(model.issues) do
-    rec(n)
+  walk(model.issues, 0)
+  local fav_rows = {}
+  for _, root in ipairs(fav_roots) do
+    subtree_rows({ root }, 0, expanded, fav_rows)
   end
-  return rows
+  return fav_rows, rest
 end
 
 local function flat_rows(nodes)
@@ -401,11 +427,13 @@ local function issue_matches(it, q)
   return table.concat(hay, "\n"):lower():find(q:lower(), 1, true) ~= nil
 end
 
+-- Returns fav_rows, rest_rows: favourited issues pulled out and pinned to the
+-- top of the pane, everything else following in its normal order/shape.
 local function compute_rows(V)
   local model, scope, search = V.model, V.scope, V.search
   -- Tree view for "all" with no search/filter/sort; flat list otherwise.
   if scope.kind == "all" and (not search or search == "") and not V.field_filter and not V.sort then
-    return tree_rows(model, V.expanded)
+    return tree_rows_split(model, V.expanded)
   end
 
   local all = flatten(model)
@@ -474,7 +502,15 @@ local function compute_rows(V)
       table.sort(matched, cmp[V.sort])
     end
   end
-  return flat_rows(matched)
+  local favs, rest = {}, {}
+  for _, n in ipairs(matched) do
+    if is_fav(n.issue) then
+      favs[#favs + 1] = n
+    else
+      rest[#rest + 1] = n
+    end
+  end
+  return flat_rows(favs), flat_rows(rest)
 end
 
 -- ── counts ──────────────────────────────────────────────────────────────────
@@ -626,75 +662,110 @@ local function render_releases(V)
   V.releases._meta = meta
 end
 
-local function render_issues(V)
-  V.rows = compute_rows(V)
-
-  -- Pre-compute "is last sibling" for each row so we can draw tree connectors.
+-- "is last sibling" per row, for tree connector drawing — computed once per
+-- rendered segment (rows within a segment only compare against each other).
+local function compute_is_last(rows)
   local is_last = {}
-  for i = 1, #V.rows do
+  for i = 1, #rows do
     is_last[i] = true -- assume last until a later sibling at the same depth proves otherwise
-    for j = i + 1, #V.rows do
-      if V.rows[j].depth < V.rows[i].depth then break end
-      if V.rows[j].depth == V.rows[i].depth then
+    for j = i + 1, #rows do
+      if rows[j].depth < rows[i].depth then break end
+      if rows[j].depth == rows[i].depth then
         is_last[i] = false
         break
       end
     end
   end
+  return is_last
+end
 
-  -- Track which ancestor levels have a continuing branch (for │ lines).
-  -- continues[depth] = true means there's a non-last ancestor at that depth.
-  local continues = {}
+local function render_issues(V)
+  local fav_rows, rest_rows = compute_rows(V)
 
-  local lines, meta = {}, {}
-  for i, r in ipairs(V.rows) do
-    local n = r.node
-    local it = n.issue or {}
-    -- Left gutter: multi-select mark takes precedence, else branch-edit marker
-    -- (bright = this issue, dim = a descendant).
-    local gut, gut_hl
-    if V.marked and V.marked[n.id] then
-      gut, gut_hl = "◆", "LazyIssuesMarked"
-    else
-      gut = n._changed and "▌" or (n._changed_desc and "▏" or " ")
-      gut_hl = n._changed and "LazyIssuesChanged" or (n._changed_desc and "LazyIssuesChangedDim" or nil)
-    end
+  local lines, meta, rows = {}, {}, {}
 
-    -- Build tree connector prefix.
-    local tree = ""
-    if r.depth > 0 then
-      -- Ancestor continuation lines.
-      for d = 1, r.depth - 1 do
-        tree = tree .. (continues[d] and "│   " or "    ")
+  -- Render one contiguous segment (the pinned favourites subtree, or the main
+  -- list) into `lines`/`meta`/`rows`. Each segment tracks its own tree
+  -- connectors so the two don't bleed into each other.
+  local function render_segment(seg_rows)
+    local is_last = compute_is_last(seg_rows)
+    -- continues[depth] = true means there's a non-last ancestor at that depth.
+    local continues = {}
+    for i, r in ipairs(seg_rows) do
+      local n = r.node
+      local it = n.issue or {}
+      -- Left gutter: multi-select mark takes precedence, else branch-edit marker
+      -- (bright = this issue, dim = a descendant).
+      local gut, gut_hl
+      if V.marked and V.marked[n.id] then
+        gut, gut_hl = "◆", "LazyIssuesMarked"
+      else
+        gut = n._changed and "▌" or (n._changed_desc and "▏" or " ")
+        gut_hl = n._changed and "LazyIssuesChanged" or (n._changed_desc and "LazyIssuesChangedDim" or nil)
       end
-      -- This node's connector.
-      tree = tree .. (is_last[i] and "└── " or "├── ")
-    end
-    -- Update continuation tracking for children.
-    continues[r.depth] = not is_last[i]
-    -- Clear deeper levels.
-    for d = r.depth + 1, 10 do continues[d] = nil end
 
-    local marker = r.has_children and (r.expanded and "▼ " or "▶ ") or ""
-    local glyph = icons.glyph(it.Status)
-    local prefix = gut .. " " .. tree .. marker
-    lines[#lines + 1] = prefix .. glyph .. " " .. (it.Title or "(untitled)")
-    meta[#meta + 1] = { gut_hl = gut_hl, prefix_len = #prefix }
+      -- Build tree connector prefix.
+      local tree = ""
+      if r.depth > 0 then
+        -- Ancestor continuation lines.
+        for d = 1, r.depth - 1 do
+          tree = tree .. (continues[d] and "│   " or "    ")
+        end
+        -- This node's connector.
+        tree = tree .. (is_last[i] and "└── " or "├── ")
+      end
+      -- Update continuation tracking for children.
+      continues[r.depth] = not is_last[i]
+      -- Clear deeper levels.
+      for d = r.depth + 1, 10 do continues[d] = nil end
+
+      local marker = r.has_children and (r.expanded and "▼ " or "▶ ") or ""
+      local pre_star = gut .. " " .. tree .. marker
+      local star = is_fav(it) and "★ " or ""
+      local glyph = icons.glyph(it.Status)
+      local prefix = pre_star .. star
+      lines[#lines + 1] = prefix .. glyph .. " " .. (it.Title or "(untitled)")
+      meta[#meta + 1] = {
+        gut_hl = gut_hl,
+        prefix_len = #prefix,
+        status = it.Status,
+        star_range = star ~= "" and { #pre_star, #prefix } or nil,
+      }
+      rows[#rows + 1] = r
+    end
   end
+
+  if #fav_rows > 0 then
+    lines[#lines + 1] = string.format("  ★ Favourites (%d)", #fav_rows)
+    meta[#meta + 1] = { header = true }
+    rows[#rows + 1] = {}
+    render_segment(fav_rows)
+    lines[#lines + 1] = "  " .. string.rep("─", 30)
+    meta[#meta + 1] = { header = true }
+    rows[#rows + 1] = {}
+  end
+  render_segment(rest_rows)
+
+  V.rows = rows
   if #lines == 0 then
     lines = { "  (no issues in scope)" }
   end
   set_lines(V.issues.bufnr, lines)
   vim.api.nvim_buf_clear_namespace(V.issues.bufnr, ns, 0, -1)
-  for i, r in ipairs(V.rows) do
-    local status = (r.node.issue or {}).Status
-    local m = meta[i]
-    if m.gut_hl then
-      hl(V.issues.bufnr, m.gut_hl, i - 1, 0, 3) -- gutter char is 3 bytes
+  for i, m in ipairs(meta) do
+    if m.header then
+      hl(V.issues.bufnr, "LazyIssuesLabel", i - 1)
+    else
+      if m.gut_hl then
+        hl(V.issues.bufnr, m.gut_hl, i - 1, 0, 3) -- gutter char is 3 bytes
+      end
+      if m.star_range then
+        hl(V.issues.bufnr, "LazyIssuesFavourite", i - 1, m.star_range[1], m.star_range[2])
+      end
+      -- Apply status highlight from the glyph onwards so strikethrough
+      -- doesn't extend across the leading gutter/indent area.
+      hl(V.issues.bufnr, icons.status_hl[m.status] or "Normal", i - 1, m.prefix_len, -1)
     end
-    -- Apply status highlight from the glyph onwards so strikethrough
-    -- doesn't extend across the leading gutter/indent area.
-    hl(V.issues.bufnr, icons.status_hl[status] or "Normal", i - 1, m.prefix_len, -1)
   end
 end
 
@@ -897,7 +968,16 @@ local function refresh(V, keep_cursor)
   render_releases(V)
   render_issues(V)
   if not keep_cursor and V.issues.winid and vim.api.nvim_win_is_valid(V.issues.winid) then
-    pcall(vim.api.nvim_win_set_cursor, V.issues.winid, { 1, 0 })
+    -- Skip past the "Favourites" header/separator rows (no node) to land on
+    -- the first real issue.
+    local first = 1
+    for i, r in ipairs(V.rows) do
+      if r.node then
+        first = i
+        break
+      end
+    end
+    pcall(vim.api.nvim_win_set_cursor, V.issues.winid, { first, 0 })
   end
   render_detail(V, selected_node(V))
   update_scrollbars(V)
@@ -1226,9 +1306,10 @@ local function reload_select(V, id)
   end
 end
 
--- Status is always editable (to reopen); everything else is locked when Closed.
+-- Status is always editable (to reopen); IsFavourite is a bookmark, not issue
+-- content, so it stays editable too. Everything else locks when Closed.
 local function editable(node, key)
-  if key == "Status" then
+  if key == "Status" or key == "IsFavourite" then
     return true
   end
   return (node.issue or {}).Status ~= "Closed"
@@ -1252,6 +1333,15 @@ local function apply_field(V, node, key, value)
   end
   node.issue = it
   refresh(V, true)
+end
+
+-- Toggle the favourite bookmark on the selected issue.
+local function toggle_favourite(V, node)
+  node = node or selected_node(V)
+  if not node or not node.issue then
+    return
+  end
+  apply_field(V, node, "IsFavourite", not is_fav(node.issue))
 end
 
 -- Apply one action to every marked issue (set a field, set sprint, or delete).
@@ -1982,6 +2072,15 @@ local function edit_menu(V)
   local lines = {}
   local dispatch = {}
   local tmpl = V.model.template
+
+  -- Favourite is a system field present regardless of template; always the
+  -- first item in the menu (never locked, even when Closed).
+  local fav = is_fav(it)
+  lines[#lines + 1] = item(fav and "★ Favourite" or "☆ Favourite", fav and "yes" or "no", nil, "favourite")
+  dispatch.favourite = function()
+    toggle_favourite(V, node)
+    reopen()
+  end
 
   -- Build field items from template if available, else hardcoded.
   if tmpl then
@@ -3028,6 +3127,9 @@ local function map_keys(V, bufnr, kind)
     map("y", function()
       yank_id(V)
     end)
+    map("*", function()
+      toggle_favourite(V)
+    end)
     map("gf", function()
       open_raw(V)
     end)
@@ -3122,6 +3224,7 @@ function M.help()
     "    in the o / O title prompt:  Ctrl-a confirms and creates another",
     "    quick:  s status  S cycle  p priority  t type  a assignee  m sprint",
     "    T tags   d desc   n note-type   N note   K preview   y yank id",
+    "    * toggle favourite (pinned to the top of the issues pane)",
     "    gf raw json   gx reveal issue folder in OS file manager",
     "",
     "  Multi-select",
@@ -3181,6 +3284,7 @@ function M.help()
     { "Improvement", "LazyIssuesImprovement" },
     { "▌ on this branch", "LazyIssuesChanged" },
     { "▏ has an edited child", "LazyIssuesChangedDim" },
+    { "* toggle favourite", "LazyIssuesFavourite" },
   }
   for i, line in ipairs(lines) do
     local idx = i - 1

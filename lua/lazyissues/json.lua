@@ -136,7 +136,7 @@ function M.encode_issue(it, template)
   local field_order
   if template then
     -- System fields first, then template fields in order.
-    field_order = { "Id" }
+    field_order = { "Id", "IsFavourite" }
     for _, f in ipairs(template.fields) do
       field_order[#field_order + 1] = f.name
     end
@@ -154,8 +154,14 @@ function M.encode_issue(it, template)
       return comments_array(it.Comments, 2)
     end
     local v = it[key]
-    if v == nil and not template then
-      v = config.issue_defaults[key]
+    if v == nil then
+      -- IsFavourite is a system field: falls back to false on any pre-existing
+      -- issue.json written before the field existed, template or not.
+      if key == "IsFavourite" then
+        v = false
+      elseif not template then
+        v = config.issue_defaults[key]
+      end
     end
     return scalar(v)
   end)
