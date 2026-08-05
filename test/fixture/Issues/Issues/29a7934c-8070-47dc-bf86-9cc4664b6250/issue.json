@@ -1,6 +1,8 @@
 {
   "Id": "29a7934c-8070-47dc-bf86-9cc4664b6250",
-  "IsFavourite": true,
+  "FavouritedBy": [
+    "David"
+  ],
   "Type": "Feature",
   "Title": "Backend caching system",
   "Description": "",

@@ -136,7 +136,7 @@ function M.encode_issue(it, template)
   local field_order
   if template then
     -- System fields first, then template fields in order.
-    field_order = { "Id", "IsFavourite" }
+    field_order = { "Id", "FavouritedBy" }
     for _, f in ipairs(template.fields) do
       field_order[#field_order + 1] = f.name
     end
@@ -148,20 +148,17 @@ function M.encode_issue(it, template)
   return object(field_order, 0, function(key)
     -- Arrays sit at the field's indent (2), so their elements nest at 4 — matching
     -- System.Text.Json. (Empty [] hid this; non-empty Tags/Comments need it.)
-    if key == "Tags" or key == "Labels" then
+    -- string_array treats a nil/missing list as [], so FavouritedBy on a
+    -- pre-existing issue.json (written before the field existed) is covered
+    -- for free, template or not.
+    if key == "Tags" or key == "Labels" or key == "FavouritedBy" then
       return string_array(it[key], 2)
     elseif key == "Comments" then
       return comments_array(it.Comments, 2)
     end
     local v = it[key]
-    if v == nil then
-      -- IsFavourite is a system field: falls back to false on any pre-existing
-      -- issue.json written before the field existed, template or not.
-      if key == "IsFavourite" then
-        v = false
-      elseif not template then
-        v = config.issue_defaults[key]
-      end
+    if v == nil and not template then
+      v = config.issue_defaults[key]
     end
     return scalar(v)
   end)

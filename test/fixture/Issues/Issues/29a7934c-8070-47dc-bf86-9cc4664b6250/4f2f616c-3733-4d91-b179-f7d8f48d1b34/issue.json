@@ -1,6 +1,6 @@
 {
   "Id": "4f2f616c-3733-4d91-b179-f7d8f48d1b34",
-  "IsFavourite": false,
+  "FavouritedBy": [],
   "Type": "Task",
   "Title": "add cache layer",
   "Description": "",

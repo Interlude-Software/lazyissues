@@ -350,8 +350,14 @@ end
 
 -- ── scope → visible rows ────────────────────────────────────────────────────
 
-local function is_fav(it)
-  return it ~= nil and it.IsFavourite == true
+-- FavouritedBy is a list of usernames; "favourited" is relative to whoever's
+-- looking (V.user), not a single shared flag.
+local function is_fav(it, user)
+  return it ~= nil
+    and type(it.FavouritedBy) == "table"
+    and user ~= nil
+    and user ~= ""
+    and vim.tbl_contains(it.FavouritedBy, user)
 end
 
 -- A row = { node, depth, has_children, expanded }. Appends rows for `nodes`
@@ -371,11 +377,11 @@ end
 -- normal position so they can be pinned to the top of the pane instead.
 -- Returns fav_rows (each favourited node rendered as its own mini-tree,
 -- rooted at depth 0) and rest_rows (everything else, in its normal tree shape).
-local function tree_rows_split(model, expanded)
+local function tree_rows_split(model, expanded, user)
   local fav_roots, rest = {}, {}
   local function walk(nodes, depth)
     for _, n in ipairs(nodes) do
-      if is_fav(n.issue) then
+      if is_fav(n.issue, user) then
         fav_roots[#fav_roots + 1] = n
       else
         local has = #n.children > 0
@@ -433,7 +439,7 @@ local function compute_rows(V)
   local model, scope, search = V.model, V.scope, V.search
   -- Tree view for "all" with no search/filter/sort; flat list otherwise.
   if scope.kind == "all" and (not search or search == "") and not V.field_filter and not V.sort then
-    return tree_rows_split(model, V.expanded)
+    return tree_rows_split(model, V.expanded, V.user)
   end
 
   local all = flatten(model)
@@ -504,7 +510,7 @@ local function compute_rows(V)
   end
   local favs, rest = {}, {}
   for _, n in ipairs(matched) do
-    if is_fav(n.issue) then
+    if is_fav(n.issue, V.user) then
       favs[#favs + 1] = n
     else
       rest[#rest + 1] = n
@@ -721,7 +727,7 @@ local function render_issues(V)
 
       local marker = r.has_children and (r.expanded and "▼ " or "▶ ") or ""
       local pre_star = gut .. " " .. tree .. marker
-      local star = is_fav(it) and "★ " or ""
+      local star = is_fav(it, V.user) and "★ " or ""
       local glyph = icons.glyph(it.Status)
       local prefix = pre_star .. star
       lines[#lines + 1] = prefix .. glyph .. " " .. (it.Title or "(untitled)")
@@ -1297,7 +1303,7 @@ local function reload_select(V, id)
   refresh(V)
   if id then
     for i, r in ipairs(V.rows) do
-      if r.node.id == id then
+      if r.node and r.node.id == id then
         pcall(vim.api.nvim_win_set_cursor, V.issues.winid, { i, 0 })
         render_detail(V, selected_node(V))
         return
@@ -1306,10 +1312,10 @@ local function reload_select(V, id)
   end
 end
 
--- Status is always editable (to reopen); IsFavourite is a bookmark, not issue
+-- Status is always editable (to reopen); FavouritedBy is a bookmark, not issue
 -- content, so it stays editable too. Everything else locks when Closed.
 local function editable(node, key)
-  if key == "Status" or key == "IsFavourite" then
+  if key == "Status" or key == "FavouritedBy" then
     return true
   end
   return (node.issue or {}).Status ~= "Closed"
@@ -1335,13 +1341,45 @@ local function apply_field(V, node, key, value)
   refresh(V, true)
 end
 
--- Toggle the favourite bookmark on the selected issue.
+-- Add/remove `user` from an issue's FavouritedBy list, preserving everyone
+-- else's entry (it's a shared, committed field — toggling your own bookmark
+-- must never clobber a teammate's).
+local function toggle_favourite_user(V, node, user)
+  local cur = (type(node.issue.FavouritedBy) == "table") and node.issue.FavouritedBy or {}
+  local list, found = {}, false
+  for _, u in ipairs(cur) do
+    if u == user then
+      found = true
+    else
+      list[#list + 1] = u
+    end
+  end
+  if not found then
+    list[#list + 1] = user
+  end
+  V.user = user
+  apply_field(V, node, "FavouritedBy", list)
+end
+
+-- Toggle the favourite bookmark on the selected issue for the current user.
+-- Falls back to prompting for a name if git user.name / $USER couldn't be
+-- resolved when the view opened (mirrors the comment-author fallback).
 local function toggle_favourite(V, node)
   node = node or selected_node(V)
   if not node or not node.issue then
     return
   end
-  apply_field(V, node, "IsFavourite", not is_fav(node.issue))
+  if V.user and V.user ~= "" then
+    toggle_favourite_user(V, node, V.user)
+    return
+  end
+  local default = gitmod.user_name(V.root) or vim.env.USER or ""
+  prompt_input("Your name (for favouriting)", default, function(name)
+    name = name and vim.trim(name) or ""
+    if name ~= "" then
+      toggle_favourite_user(V, node, name)
+    end
+  end)
 end
 
 -- Apply one action to every marked issue (set a field, set sprint, or delete).
@@ -2074,9 +2112,13 @@ local function edit_menu(V)
   local tmpl = V.model.template
 
   -- Favourite is a system field present regardless of template; always the
-  -- first item in the menu (never locked, even when Closed).
-  local fav = is_fav(it)
-  lines[#lines + 1] = item(fav and "★ Favourite" or "☆ Favourite", fav and "yes" or "no", nil, "favourite")
+  -- first item in the menu (never locked, even when Closed). FavouritedBy is
+  -- a shared list of usernames, so the value column shows who else has it
+  -- starred while the glyph reflects just your own status.
+  local fav_by = (type(it.FavouritedBy) == "table") and it.FavouritedBy or {}
+  local fav = is_fav(it, V.user)
+  lines[#lines + 1] =
+    item(fav and "★ Favourite" or "☆ Favourite", #fav_by > 0 and table.concat(fav_by, ", ") or "", nil, "favourite")
   dispatch.favourite = function()
     toggle_favourite(V, node)
     reopen()
@@ -3717,6 +3759,9 @@ function M.open()
   local V = {
     root = data_root,
     model = store.load(data_root),
+    -- Identity for the FavouritedBy list; falls back to a one-time prompt (see
+    -- toggle_favourite) if neither is set.
+    user = gitmod.user_name(data_root) or vim.env.USER or "",
     scope = { kind = "all" },
     search = "",
     expanded = {},
