@@ -1,6 +1,6 @@
 {
   "Id": "528ebf05-85d1-4eba-8c48-7de3d5c8c59e",
-  "IsFavourite": false,
+  "FavouritedBy": [],
   "Type": "Task",
   "Title": "Port tooltips",
   "Description": "",

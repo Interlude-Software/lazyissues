@@ -19,7 +19,7 @@ M.comment_authors = {}
 -- matching the backend model defaults.
 M.empty_guid = "00000000-0000-0000-0000-000000000000"
 M.issue_defaults = {
-  IsFavourite = false,
+  FavouritedBy = {},
   Type = "Task",
   Title = "",
   Description = "",
@@ -35,10 +35,12 @@ M.issue_defaults = {
 }
 
 -- Canonical field order for serialization (C# property declaration order).
--- IsFavourite is a system field like Id/CreatedAt/UpdatedAt: present on every
+-- FavouritedBy is a system field like Id/CreatedAt/UpdatedAt: present on every
 -- issue regardless of template, not part of the customizable template schema.
+-- It's a list of usernames (git user.name) who've favourited the issue, so the
+-- bookmark is shared/committed like everything else but still per-person.
 M.issue_fields = {
-  "Id", "IsFavourite", "Type", "Title", "Description", "SprintId", "Status", "Priority",
+  "Id", "FavouritedBy", "Type", "Title", "Description", "SprintId", "Status", "Priority",
   "Reporter", "Assignee", "CreatedAt", "UpdatedAt", "Tags", "Comments",
   "ReleaseNoteType", "ReleaseNote",
 }
@@ -47,7 +49,7 @@ M.sprint_fields = { "Id", "Name", "Description", "Status", "ReleaseId" }
 M.release_fields = { "Id", "Name", "Description", "Status" }
 
 -- Predefined fields available in the template picker (excludes system fields:
--- Id, IsFavourite, CreatedAt, UpdatedAt which are always present and auto-managed).
+-- Id, FavouritedBy, CreatedAt, UpdatedAt which are always present and auto-managed).
 -- Each entry: { name, type, default, values (for enums) }.
 M.predefined_fields = {
   { name = "Type", type = "enum", default = "Task", values = { "Bug", "Feature", "Task", "Improvement" } },

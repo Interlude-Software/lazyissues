@@ -71,7 +71,7 @@ function M.create_issue(data_root, fields, parent_dir)
     id = uuid4()
     it = vim.tbl_extend("force", {
       Id = id,
-      IsFavourite = false,
+      FavouritedBy = {},
       Type = config.issue_defaults.Type,
       Title = "",
       Description = "",
@@ -238,7 +238,7 @@ function M.issue_from_template(template, fields)
   local id = uuid4()
   local it = {
     Id = id,
-    IsFavourite = false,
+    FavouritedBy = {},
     CreatedAt = now_iso(),
     UpdatedAt = vim.NIL,
   }
