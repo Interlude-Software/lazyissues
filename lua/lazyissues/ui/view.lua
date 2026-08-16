@@ -1297,7 +1297,8 @@ local function reload_select(V, id)
   refresh(V)
   if id then
     for i, r in ipairs(V.rows) do
-      if r.node.id == id then
+      -- Favourites header/separator rows carry no node.
+      if r.node and r.node.id == id then
         pcall(vim.api.nvim_win_set_cursor, V.issues.winid, { i, 0 })
         render_detail(V, selected_node(V))
         return
