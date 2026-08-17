@@ -1012,6 +1012,11 @@ local function refresh(V, keep_cursor)
   end
   render_detail(V, selected_node(V))
   update_scrollbars(V)
+  -- Set by M.open once the footer window exists; keeps the `.` repeat hint in
+  -- step with the last action, not just with panel focus changes.
+  if V.update_footer then
+    V.update_footer()
+  end
 end
 
 -- ── interaction ─────────────────────────────────────────────────────────────
@@ -1351,6 +1356,43 @@ local function editable(node, key)
   return (node.issue or {}).Status ~= "Closed"
 end
 
+-- ── repeat last action (`.`) ────────────────────────────────────────────────
+
+-- One-line summary of a recorded action, shown in the footer and reused as the
+-- notification when `.` has nothing to repeat.
+local function describe_action(V, act)
+  if act.kind == "reparent" then
+    return "Re-parent → " .. (act.target_title or "(root)")
+  end
+  local key, value = act.key, act.value
+  if key == "SprintId" then
+    return "Sprint → " .. sprint_name(V.model, value)
+  elseif key == "Status" then
+    return "Status → " .. (config.status_label[value] or tostring(value))
+  elseif key == "IsFavourite" then
+    return "Favourite → " .. (value and "on" or "off")
+  elseif key == "Tags" then
+    local joined = table.concat(value or {}, ", ")
+    return "Tags → " .. (joined ~= "" and joined or "(none)")
+  end
+  local text = tostring(value == vim.NIL and "" or (value or ""))
+  text = text:gsub("%s+", " ")
+  if text == "" then
+    return key .. " → (empty)"
+  end
+  return key .. " → " .. text
+end
+
+-- Record the action `.` will replay. Table values are copied so a later edit to
+-- one issue's list can't mutate the recording (or another issue that got it).
+local function record_action(V, act)
+  if type(act.value) == "table" then
+    act.value = vim.deepcopy(act.value)
+  end
+  act.label = describe_action(V, act)
+  V.last_action = act
+end
+
 -- Apply a single field change to the selected issue and persist it.
 local function apply_field(V, node, key, value)
   if not node or not node.issue then
@@ -1368,6 +1410,7 @@ local function apply_field(V, node, key, value)
     return
   end
   node.issue = it
+  record_action(V, { kind = "field", key = key, value = value })
   refresh(V, true)
 end
 
@@ -1937,6 +1980,25 @@ local function fuzzy_pick(title_word, items, on_choose)
   end)
 end
 
+-- Move `node` under `target` (nil = the issues root), recording it for `.`.
+local function do_reparent(V, node, target)
+  local ok, err = actions.change_parent(V.root, node.path, node.id, target and target.path or nil)
+  if not ok then
+    vim.notify("lazyissues: " .. tostring(err), vim.log.levels.ERROR)
+    return
+  end
+  if target then
+    V.expanded[target.id] = true
+  end
+  record_action(V, {
+    kind = "reparent",
+    target_id = target and target.id or nil,
+    target_title = target and vim.trim(tostring(target.issue and target.issue.Title or target.id))
+      or nil,
+  })
+  reload_select(V, node.id)
+end
+
 local function change_parent_action(V)
   local node = selected_node(V)
   if not node then
@@ -1964,17 +2026,53 @@ local function change_parent_action(V)
     if not item then
       return
     end
-    local target = item.node
-    local ok, err = actions.change_parent(V.root, node.path, node.id, target and target.path or nil)
-    if not ok then
-      vim.notify("lazyissues: " .. tostring(err), vim.log.levels.ERROR)
-      return
-    end
-    if target then
-      V.expanded[target.id] = true
-    end
-    reload_select(V, node.id)
+    do_reparent(V, node, item.node)
   end)
+end
+
+-- Repeat the last recorded action on the issue under the cursor. Field edits
+-- go back through apply_field (so the Closed-issue lock still applies); a
+-- re-parent re-resolves its target by id, since paths shift as issues move.
+local function repeat_last(V)
+  local act = V.last_action
+  if not act then
+    vim.notify("lazyissues: nothing to repeat yet", vim.log.levels.INFO)
+    return
+  end
+  local node = selected_node(V)
+  if not node or not node.issue then
+    return
+  end
+  if act.kind == "field" then
+    -- Copy list values per replay so repeated issues don't share one table.
+    local value = act.value
+    if type(value) == "table" then
+      value = vim.deepcopy(value)
+    end
+    apply_field(V, node, act.key, value)
+  elseif act.kind == "reparent" then
+    local target
+    if act.target_id then
+      for _, n in ipairs(flatten(V.model)) do
+        if n.id == act.target_id then
+          target = n
+          break
+        end
+      end
+      if not target then
+        vim.notify("lazyissues: re-parent target no longer exists", vim.log.levels.WARN)
+        return
+      end
+      if target.id == node.id or target.path:sub(1, #node.path + 1) == node.path .. "/" then
+        vim.notify(
+          "lazyissues: cannot move an issue into itself or a descendant",
+          vim.log.levels.WARN
+        )
+        return
+      end
+    end
+    do_reparent(V, node, target)
+  end
 end
 
 -- Fuzzy-jump to any issue across the whole tree, regardless of the current
@@ -3279,6 +3377,9 @@ local function map_keys(V, bufnr, kind)
     map("P", function()
       change_parent_action(V)
     end)
+    map(".", function()
+      repeat_last(V)
+    end)
     -- Multi-select + bulk
     map("x", function()
       toggle_mark(V)
@@ -3320,6 +3421,7 @@ function M.help()
     "    quick:  s status  S cycle  p priority  t type  a assignee  m sprint",
     "    T tags   d desc   n note-type   N note   K preview   y yank id",
     "    * toggle favourite (pinned to the top of the issues pane)",
+    "    .  repeat the last edit or re-parent on the issue under the cursor",
     "    gf raw json   gx reveal issue folder in OS file manager",
     "",
     "  Multi-select",
@@ -3903,6 +4005,26 @@ function M.open()
     issues = "  e edit   c comments   o new   O child   D del   P re-parent   / find   B board   ? help",
     detail = "  B board     Tab / 1-5 panels     ? help     q quit",
   }
+  -- The repeat hint is pinned to the right of the issues row; it shrinks to fit
+  -- a narrow window and drops out entirely rather than pushing the line to wrap.
+  local function repeat_hint(hints, width)
+    if not V.last_action then
+      return nil
+    end
+    local room = width - vim.fn.strdisplaywidth(hints) - 3
+    if room < 10 then
+      return nil
+    end
+    local text = ". " .. V.last_action.label
+    if vim.fn.strdisplaywidth(text) > room then
+      text = vim.fn.strcharpart(text, 0, vim.fn.strchars(text) - 1)
+      while vim.fn.strdisplaywidth(text .. "…") > room and vim.fn.strchars(text) > 3 do
+        text = vim.fn.strcharpart(text, 0, vim.fn.strchars(text) - 1)
+      end
+      text = text .. "…"
+    end
+    return text
+  end
   local function current_panel()
     local w = vim.api.nvim_get_current_win()
     for _, name in ipairs({ "scopes", "sprints", "releases", "issues", "detail" }) do
@@ -3920,12 +4042,28 @@ function M.open()
     if not panel_name then
       return
     end
+    local line = FOOTER_HINTS[panel_name] or ""
+    local rep, rep_col
+    if panel_name == "issues" and V.footer.winid and vim.api.nvim_win_is_valid(V.footer.winid) then
+      rep = repeat_hint(line, vim.api.nvim_win_get_width(V.footer.winid))
+      if rep then
+        local pad = vim.api.nvim_win_get_width(V.footer.winid)
+          - vim.fn.strdisplaywidth(line)
+          - vim.fn.strdisplaywidth(rep)
+        rep_col = #line + pad
+        line = line .. string.rep(" ", pad) .. rep
+      end
+    end
     vim.bo[V.footer.bufnr].modifiable = true
-    vim.api.nvim_buf_set_lines(V.footer.bufnr, 0, -1, false, { FOOTER_HINTS[panel_name] or "" })
+    vim.api.nvim_buf_set_lines(V.footer.bufnr, 0, -1, false, { line })
     vim.bo[V.footer.bufnr].modifiable = false
     vim.api.nvim_buf_clear_namespace(V.footer.bufnr, ns, 0, -1)
-    vim.api.nvim_buf_add_highlight(V.footer.bufnr, ns, "LazyIssuesFooter", 0, 0, -1)
+    vim.api.nvim_buf_add_highlight(V.footer.bufnr, ns, "LazyIssuesFooter", 0, 0, rep_col or -1)
+    if rep_col then
+      vim.api.nvim_buf_add_highlight(V.footer.bufnr, ns, "LazyIssuesRepeat", 0, rep_col, -1)
+    end
   end
+  V.update_footer = update_footer
 
   V.augroup = vim.api.nvim_create_augroup("LazyIssuesView", { clear = true })
   vim.api.nvim_create_autocmd("CursorMoved", {
