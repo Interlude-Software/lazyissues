@@ -54,6 +54,8 @@ function M.setup()
     LazyIssuesChangedDim = { fg = "#8a7a55" },
     -- Footer shortcut bar — brighter than Comment so it reads clearly.
     LazyIssuesFooter = { fg = "#b8c0e0" },
+    -- The `.` repeat hint, dimmed so it reads as state rather than a shortcut.
+    LazyIssuesRepeat = { fg = "#7f8699", italic = true },
     -- White border for all popups.
     LazyIssuesBorder = { fg = "#ffffff" },
     -- Vertical scrollbar: bright thumb over a dim track.
