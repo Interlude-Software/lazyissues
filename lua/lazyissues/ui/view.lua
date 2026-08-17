@@ -67,10 +67,19 @@ local function prompt_input(label, default, on_accept, opts)
     },
     zindex = 60,
     buf_options = { modifiable = true, filetype = multiline and "markdown" or "" },
-    win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder", wrap = multiline or false },
+    win_options = {
+      winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder",
+      wrap = multiline or false,
+    },
   })
   pop:mount()
-  vim.api.nvim_buf_set_lines(pop.bufnr, 0, -1, false, vim.split(tostring(default or ""), "\n", { plain = true }))
+  vim.api.nvim_buf_set_lines(
+    pop.bufnr,
+    0,
+    -1,
+    false,
+    vim.split(tostring(default or ""), "\n", { plain = true })
+  )
   local finished = false
   local function finish(accept, again)
     if finished then
@@ -147,7 +156,9 @@ local function prompt_select(label, items, on_choice)
       },
     },
     zindex = 60,
-    win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder,CursorLine:PmenuSel" },
+    win_options = {
+      winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder,CursorLine:PmenuSel",
+    },
   }, {
     lines = menu_items,
     keymap = {
@@ -180,7 +191,12 @@ local function info_popup(title, lines, hls, opts)
     border = {
       style = "rounded",
       highlight = "LazyIssuesBorder",
-      text = { top = " " .. title .. " ", top_align = "center", bottom = " q close ", bottom_align = "center" },
+      text = {
+        top = " " .. title .. " ",
+        top_align = "center",
+        bottom = " q close ",
+        bottom_align = "center",
+      },
     },
     relative = "editor",
     position = "50%",
@@ -231,7 +247,8 @@ local function update_scrollbar(p)
   local topline = (vim.fn.getwininfo(p.winid)[1] or {}).topline or 1
   local thumb = math.max(1, math.floor(height * height / total + 0.5))
   local maxpos = height - thumb
-  local pos = math.max(0, math.min(maxpos, math.floor((topline - 1) / (total - height) * maxpos + 0.5)))
+  local pos =
+    math.max(0, math.min(maxpos, math.floor((topline - 1) / (total - height) * maxpos + 0.5)))
 
   if not (p._sb and vim.api.nvim_buf_is_valid(p._sb.buf)) then
     local buf = vim.api.nvim_create_buf(false, true)
@@ -483,7 +500,8 @@ local function compute_rows(V)
     end
     local cmp = {
       Priority = function(a, b)
-        return rank(config.issue_priority, a.issue.Priority) > rank(config.issue_priority, b.issue.Priority)
+        return rank(config.issue_priority, a.issue.Priority)
+          > rank(config.issue_priority, b.issue.Priority)
       end,
       Status = function(a, b)
         return rank(config.issue_status, a.issue.Status) < rank(config.issue_status, b.issue.Status)
@@ -604,7 +622,7 @@ local function render_sprints(V)
     local marker = expanded and "▼ " or "▶ "
     -- A sprint header is "active" when its scope is selected but not collapsed
     -- into a specific category row.
-    local header_active = sel and sel.id == sp.Id and (not expanded)
+    local header_active = sel and sel.id == sp.Id and not expanded
     lines[#lines + 1] = string.format("%s%s (%d)", marker, sp.Name, c.all)
     meta[#meta + 1] = { kind = "sprint", id = sp.Id }
     actives[#lines] = header_active or nil
@@ -669,7 +687,9 @@ local function compute_is_last(rows)
   for i = 1, #rows do
     is_last[i] = true -- assume last until a later sibling at the same depth proves otherwise
     for j = i + 1, #rows do
-      if rows[j].depth < rows[i].depth then break end
+      if rows[j].depth < rows[i].depth then
+        break
+      end
       if rows[j].depth == rows[i].depth then
         is_last[i] = false
         break
@@ -701,7 +721,8 @@ local function render_issues(V)
         gut, gut_hl = "◆", "LazyIssuesMarked"
       else
         gut = n._changed and "▌" or (n._changed_desc and "▏" or " ")
-        gut_hl = n._changed and "LazyIssuesChanged" or (n._changed_desc and "LazyIssuesChangedDim" or nil)
+        gut_hl = n._changed and "LazyIssuesChanged"
+          or (n._changed_desc and "LazyIssuesChangedDim" or nil)
       end
 
       -- Build tree connector prefix.
@@ -717,7 +738,9 @@ local function render_issues(V)
       -- Update continuation tracking for children.
       continues[r.depth] = not is_last[i]
       -- Clear deeper levels.
-      for d = r.depth + 1, 10 do continues[d] = nil end
+      for d = r.depth + 1, 10 do
+        continues[d] = nil
+      end
 
       local marker = r.has_children and (r.expanded and "▼ " or "▶ ") or ""
       local pre_star = gut .. " " .. tree .. marker
@@ -814,7 +837,10 @@ local function render_detail(V, node)
     local barw = 14
     local filled = math.floor(p * barw + 0.5)
     add(
-      "  " .. string.rep("█", filled) .. string.rep("░", barw - filled) .. string.format("  %d%%", math.floor(p * 100 + 0.5)),
+      "  "
+        .. string.rep("█", filled)
+        .. string.rep("░", barw - filled)
+        .. string.format("  %d%%", math.floor(p * 100 + 0.5)),
       "LazyIssuesInProgress"
     )
     add("")
@@ -838,7 +864,11 @@ local function render_detail(V, node)
     ReleaseNoteType = "Rel. note",
   }
   -- Combined release-note display: show note text if Public, else "(none)".
-  local release_note_display = (it.ReleaseNoteType == "Public" and it.ReleaseNote ~= "" and it.ReleaseNote ~= vim.NIL)
+  local release_note_display = (
+    it.ReleaseNoteType == "Public"
+    and it.ReleaseNote ~= ""
+    and it.ReleaseNote ~= vim.NIL
+  )
       and val(it.ReleaseNote)
     or "(none)"
   if tmpl then
@@ -905,7 +935,8 @@ local function render_detail(V, node)
       add("    —")
     else
       for _, c in ipairs(comments) do
-        local author = (c.Author and c.Author ~= vim.NIL and c.Author ~= "") and tostring(c.Author) or "—"
+        local author = (c.Author and c.Author ~= vim.NIL and c.Author ~= "") and tostring(c.Author)
+          or "—"
         local date = tostring(c.CreatedAt or ""):sub(1, 10)
         local li = add(string.format("  %s · %s", author, date))
         hls[#hls + 1] = { "LazyIssuesLabel", li, 2, 2 + #author }
@@ -1211,14 +1242,18 @@ end
 
 -- Sort the issue list (switches to a flat view); "Default (tree)" restores the tree.
 local function sort_action(V)
-  prompt_select("Sort by:", { "Default (tree)", "Priority", "Status", "% complete", "Created", "Title" }, function(choice)
-    if not choice then
-      return
+  prompt_select(
+    "Sort by:",
+    { "Default (tree)", "Priority", "Status", "% complete", "Created", "Title" },
+    function(choice)
+      if not choice then
+        return
+      end
+      V.sort = (choice ~= "Default (tree)") and choice or nil
+      refresh(V)
+      focus(V, "issues")
     end
-    V.sort = (choice ~= "Default (tree)") and choice or nil
-    refresh(V)
-    focus(V, "issues")
-  end)
+  )
 end
 
 -- Move the cursor to the next/prev issue edited on this branch (wraps around).
@@ -1566,7 +1601,11 @@ local function comments_view(V, on_close)
     size = { width = "60%", height = "60%" },
     zindex = 60,
     buf_options = { modifiable = false, filetype = "lazyissues-comments" },
-    win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder", cursorline = true, wrap = true },
+    win_options = {
+      winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder",
+      cursorline = true,
+      wrap = true,
+    },
   })
   pop:mount()
 
@@ -1586,7 +1625,8 @@ local function comments_view(V, on_close)
       lines = { "", "  No comments — press a to add one." }
     else
       for i, c in ipairs(cs) do
-        lines[#lines + 1] = string.format("  %s · %s", c.Author or "?", tostring(c.CreatedAt or ""):sub(1, 16))
+        lines[#lines + 1] =
+          string.format("  %s · %s", c.Author or "?", tostring(c.CreatedAt or ""):sub(1, 16))
         headers[#lines] = true
         linemap[#lines] = i
         for _, bl in ipairs(vim.split(c.Body or "", "\n", { plain = true })) do
@@ -1745,7 +1785,11 @@ local function fuzzy_pick(title_word, items, on_choose)
     enter = false,
     relative = "editor",
     position = { row = list_row, col = list_col },
-    border = { style = "rounded", text = { top = top, top_align = "center" }, highlight = "LazyIssuesBorder" },
+    border = {
+      style = "rounded",
+      text = { top = top, top_align = "center" },
+      highlight = "LazyIssuesBorder",
+    },
     size = { width = pop_w, height = list_h },
     zindex = 60,
     buf_options = { modifiable = false, filetype = "lazyissues" },
@@ -1814,7 +1858,11 @@ local function fuzzy_pick(title_word, items, on_choose)
     text = (text or ""):lower()
     filtered = {}
     for _, item in ipairs(items) do
-      if text == "" or item.always or (item.title_lower and item.title_lower:find(text, 1, true)) then
+      if
+        text == ""
+        or item.always
+        or (item.title_lower and item.title_lower:find(text, 1, true))
+      then
         filtered[#filtered + 1] = item
       end
     end
@@ -1849,7 +1897,12 @@ local function fuzzy_pick(title_word, items, on_choose)
   })
 
   local function map_input(lhs, fn)
-    vim.keymap.set({ "n", "i" }, lhs, fn, { buffer = input_pop.bufnr, nowait = true, silent = true })
+    vim.keymap.set(
+      { "n", "i" },
+      lhs,
+      fn,
+      { buffer = input_pop.bufnr, nowait = true, silent = true }
+    )
   end
   map_input("<CR>", confirm)
   map_input("<Esc>", function()
@@ -1933,7 +1986,11 @@ local function jump_to_issue(V)
     for _, c in ipairs(list) do
       if c.issue then
         local title = (c.issue.Title or "(untitled)"):sub(1, 50)
-        items[#items + 1] = { label = icons.glyph(c.issue.Status) .. " " .. title, title_lower = title:lower(), node = c }
+        items[#items + 1] = {
+          label = icons.glyph(c.issue.Status) .. " " .. title,
+          title_lower = title:lower(),
+          node = c,
+        }
       end
       collect(c.children)
     end
@@ -2059,7 +2116,10 @@ local function edit_menu(V)
   end
   local tags = (it.Tags and #it.Tags > 0) and table.concat(it.Tags, ", "):sub(1, 12) or ""
   local function item(name, value, field, action)
-    return Menu.item(string.format("  %-17s %s%s", name, value or "", lk(field)), { action = action })
+    return Menu.item(
+      string.format("  %-17s %s%s", name, value or "", lk(field)),
+      { action = action }
+    )
   end
 
   -- Reopen the menu after a field edit (success or cancel) so it acts as a hub.
@@ -2077,7 +2137,8 @@ local function edit_menu(V)
   -- Favourite is a system field present regardless of template; always the
   -- first item in the menu (never locked, even when Closed).
   local fav = is_fav(it)
-  lines[#lines + 1] = item(fav and "★ Favourite" or "☆ Favourite", fav and "yes" or "no", nil, "favourite")
+  lines[#lines + 1] =
+    item(fav and "★ Favourite" or "☆ Favourite", fav and "yes" or "no", nil, "favourite")
   dispatch.favourite = function()
     toggle_favourite(V, node)
     reopen()
@@ -2132,7 +2193,9 @@ local function edit_menu(V)
             locked_notify()
             return done(reopen)
           end
-          local cur = (type(node2.issue[fname]) == "table" and table.concat(node2.issue[fname], ", ")) or ""
+          local cur = (
+            type(node2.issue[fname]) == "table" and table.concat(node2.issue[fname], ", ")
+          ) or ""
           prompt_input(fname .. " (comma-separated)", cur, function(input)
             if input ~= nil then
               local items2 = {}
@@ -2253,9 +2316,16 @@ local function edit_menu(V)
     border = {
       style = "rounded",
       highlight = "LazyIssuesBorder",
-      text = { top = " Edit issue ", top_align = "center", bottom = " ↵ select · q close ", bottom_align = "center" },
+      text = {
+        top = " Edit issue ",
+        top_align = "center",
+        bottom = " ↵ select · q close ",
+        bottom_align = "center",
+      },
     },
-    win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder,CursorLine:PmenuSel" },
+    win_options = {
+      winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder,CursorLine:PmenuSel",
+    },
   }, {
     lines = lines,
     keymap = {
@@ -2378,9 +2448,16 @@ local function sprint_edit_menu(V)
     border = {
       style = "rounded",
       highlight = "LazyIssuesBorder",
-      text = { top = " Edit sprint ", top_align = "center", bottom = " ↵ select · q close ", bottom_align = "center" },
+      text = {
+        top = " Edit sprint ",
+        top_align = "center",
+        bottom = " ↵ select · q close ",
+        bottom_align = "center",
+      },
     },
-    win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder,CursorLine:PmenuSel" },
+    win_options = {
+      winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder,CursorLine:PmenuSel",
+    },
   }, {
     lines = lines,
     keymap = {
@@ -2566,7 +2643,12 @@ local function markdown_preview(V, key, label)
     vim.notify("lazyissues: no " .. label, vim.log.levels.INFO)
     return
   end
-  info_popup(label, vim.split(tostring(text), "\n", { plain = true }), nil, { filetype = "markdown" })
+  info_popup(
+    label,
+    vim.split(tostring(text), "\n", { plain = true }),
+    nil,
+    { filetype = "markdown" }
+  )
 end
 
 local function release_notes_preview(V, rel, on_close)
@@ -2605,7 +2687,12 @@ local function release_notes_preview(V, rel, on_close)
     border = {
       style = "rounded",
       highlight = "LazyIssuesBorder",
-      text = { top = " Release notes ", top_align = "center", bottom = " q close ", bottom_align = "center" },
+      text = {
+        top = " Release notes ",
+        top_align = "center",
+        bottom = " q close ",
+        bottom_align = "center",
+      },
     },
     relative = "editor",
     position = "50%",
@@ -2774,9 +2861,16 @@ local function release_edit_menu(V)
     border = {
       style = "rounded",
       highlight = "LazyIssuesBorder",
-      text = { top = " Edit release ", top_align = "center", bottom = " ↵ select · q close ", bottom_align = "center" },
+      text = {
+        top = " Edit release ",
+        top_align = "center",
+        bottom = " ↵ select · q close ",
+        bottom_align = "center",
+      },
     },
-    win_options = { winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder,CursorLine:PmenuSel" },
+    win_options = {
+      winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder,CursorLine:PmenuSel",
+    },
   }, {
     lines = lines,
     keymap = {
@@ -3580,8 +3674,20 @@ edit_template_flow = function(data_root, existing_template, on_done)
     end
   else
     -- No template yet: pre-select the classic field set.
-    for _, name in ipairs({ "Type", "Title", "Description", "Status", "Priority",
-      "SprintId", "Reporter", "Assignee", "Tags", "Comments", "ReleaseNoteType", "ReleaseNote" }) do
+    for _, name in ipairs({
+      "Type",
+      "Title",
+      "Description",
+      "Status",
+      "Priority",
+      "SprintId",
+      "Reporter",
+      "Assignee",
+      "Tags",
+      "Comments",
+      "ReleaseNoteType",
+      "ReleaseNote",
+    }) do
       selected[name] = true
     end
   end
@@ -3631,7 +3737,11 @@ function M.offer_init()
 
   local pop = Popup({
     enter = true,
-    border = { style = "rounded", highlight = "LazyIssuesBorder", text = { top = top, top_align = "center" } },
+    border = {
+      style = "rounded",
+      highlight = "LazyIssuesBorder",
+      text = { top = top, top_align = "center" },
+    },
     position = "50%",
     size = { width = math.max(56, #repo + 16), height = #lines },
     buf_options = { modifiable = false, filetype = "lazyissues-intro" },
@@ -3658,8 +3768,20 @@ function M.offer_init()
     -- Show the template picker so the user can select which fields their issues use.
     -- Pre-select the classic field set.
     local classic = {}
-    for _, name in ipairs({ "Type", "Title", "Description", "Status", "Priority",
-      "SprintId", "Reporter", "Assignee", "Tags", "Comments", "ReleaseNoteType", "ReleaseNote" }) do
+    for _, name in ipairs({
+      "Type",
+      "Title",
+      "Description",
+      "Status",
+      "Priority",
+      "SprintId",
+      "Reporter",
+      "Assignee",
+      "Tags",
+      "Comments",
+      "ReleaseNoteType",
+      "ReleaseNote",
+    }) do
       classic[name] = true
     end
     template_picker(classic, nil, function(fields)
@@ -3711,7 +3833,10 @@ function M.open()
       },
       focusable = true,
       buf_options = { modifiable = false, filetype = "lazyissues" },
-      win_options = { cursorline = true, winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder" },
+      win_options = {
+        cursorline = true,
+        winhighlight = "Normal:Normal,FloatBorder:LazyIssuesBorder",
+      },
     })
   end
 
